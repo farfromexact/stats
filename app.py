@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from account_review import asset_evidence, current_vs_prior
+from account_review import asset_evidence, asset_evidence_year_open, comparison_summary
 from config import DATA_DIR
 from portfolio_data import available_months, load_snapshots
 
@@ -195,6 +195,17 @@ DISPLAY_NAMES = {
     "source_rows_prior": "对比源行数",
 }
 
+YTD_DISPLAY_OVERRIDES = {
+    "full_market_value_prior": "年初市值(亿)",
+    "full_market_value_delta": "较年初变化(亿)",
+    "finance_income_mtd_current": "年初以来财务收益(亿)",
+    "comprehensive_income_mtd_current": "年初以来综合收益(亿)",
+    "avg_capital_mtd_current": "本年以来平均资金占用(亿)",
+    "finance_return_mtd": "年初以来财务收益率",
+    "comprehensive_return_mtd": "年初以来综合收益率",
+    "source_rows_prior": "年初源行数",
+}
+
 AMOUNT_COLUMNS = {
     "full_market_value",
     "finance_income_mtd",
@@ -214,16 +225,24 @@ def cached_load(data_dir: str):
     return load_snapshots(Path(data_dir))
 
 
-def clean_for_display(frame: pd.DataFrame) -> pd.DataFrame:
+def display_names_for_mode(comparison_mode: str) -> dict[str, str]:
+    names = DISPLAY_NAMES.copy()
+    if comparison_mode == "年初以来":
+        names.update(YTD_DISPLAY_OVERRIDES)
+    return names
+
+
+def clean_for_display(frame: pd.DataFrame, comparison_mode: str = "较所选月份") -> pd.DataFrame:
     display = frame.replace([np.inf, -np.inf], np.nan).copy()
-    return display.rename(columns=DISPLAY_NAMES)
+    return display.rename(columns=display_names_for_mode(comparison_mode))
 
 
-def format_table(frame: pd.DataFrame, precision: str = "display"):
-    display = clean_for_display(frame)
+def format_table(frame: pd.DataFrame, precision: str = "display", comparison_mode: str = "较所选月份"):
+    display_names = display_names_for_mode(comparison_mode)
+    display = clean_for_display(frame, comparison_mode)
     amount_decimals = 4 if precision == "source" else 2
     formatters = {}
-    for source_col, display_col in DISPLAY_NAMES.items():
+    for source_col, display_col in display_names.items():
         if display_col not in display.columns:
             continue
         if source_col in AMOUNT_COLUMNS:
@@ -260,15 +279,18 @@ def show_block_note(text: str) -> None:
     st.caption(f"口径说明：{text}")
 
 
-def quality_metrics(data: pd.DataFrame, current_month: str) -> dict[str, int]:
+def quality_metrics(data: pd.DataFrame, current_month: str, comparison_mode: str) -> dict[str, int]:
     current = data[data["snapshot_month"] == current_month]
     unassigned_manager = int((current["manager"] == "未分配/待确认").sum())
     missing_class = int((current["asset_class"] == "未分类/待确认").sum())
+    capital_col = "avg_capital_ytd" if comparison_mode == "年初以来" else "avg_capital_mtd"
+    finance_col = "finance_income_ytd" if comparison_mode == "年初以来" else "finance_income_mtd"
+    comprehensive_col = "comprehensive_income_ytd" if comparison_mode == "年初以来" else "comprehensive_income_mtd"
     invalid_return_base = int(
-        ((current["avg_capital_mtd"] <= RETURN_BASE_THRESHOLD)
-        & ((current["finance_income_mtd"] != 0) | (current["comprehensive_income_mtd"] != 0))).sum()
+        ((current[capital_col] <= RETURN_BASE_THRESHOLD)
+        & ((current[finance_col] != 0) | (current[comprehensive_col] != 0))).sum()
     )
-    negative_assets = int((current["comprehensive_income_mtd"] < 0).sum())
+    negative_assets = int((current[comprehensive_col] < 0).sum())
     return {
         "未分配经理": unassigned_manager,
         "缺省分类": missing_class,
@@ -277,26 +299,45 @@ def quality_metrics(data: pd.DataFrame, current_month: str) -> dict[str, int]:
     }
 
 
-def income_diff_breakdown(current_slice: pd.DataFrame) -> pd.DataFrame:
-    finance = float(current_slice["finance_income_mtd"].sum())
-    comprehensive = float(current_slice["comprehensive_income_mtd"].sum())
+def income_diff_breakdown(current_slice: pd.DataFrame, comparison_mode: str) -> pd.DataFrame:
+    if comparison_mode == "年初以来":
+        finance_col = "finance_income_ytd"
+        comprehensive_col = "comprehensive_income_ytd"
+        label = "年初以来"
+        source_period = "本年以来"
+    else:
+        finance_col = "finance_income_mtd"
+        comprehensive_col = "comprehensive_income_mtd"
+        label = "本月"
+        source_period = "本月以来"
+    finance = float(current_slice[finance_col].sum())
+    comprehensive = float(current_slice[comprehensive_col].sum())
     return pd.DataFrame(
         [
-            {"项目": "本月综合收益", "金额(亿)": comprehensive, "说明": "源表“综合收益（本月以来）(亿)”逐行加总。"},
-            {"项目": "本月财务收益", "金额(亿)": finance, "说明": "源表“财务收益（本月以来）(亿)”逐行加总。"},
+            {"项目": f"{label}综合收益", "金额(亿)": comprehensive, "说明": f"源表“综合收益（{source_period}）(亿)”逐行加总。"},
+            {"项目": f"{label}财务收益", "金额(亿)": finance, "说明": f"源表“财务收益（{source_period}）(亿)”逐行加总。"},
             {"项目": "差异：综合收益 - 财务收益", "金额(亿)": comprehensive - finance, "说明": "用于观察公允价值、其他综合收益等非财务收益口径影响。"},
         ]
     )
 
 
-def auto_summary(current_mv: float, prior_mv: float, finance: float, comprehensive: float, quality: dict[str, int]) -> str:
+def auto_summary(
+    current_mv: float,
+    prior_mv: float,
+    finance: float,
+    comprehensive: float,
+    quality: dict[str, int],
+    comparison_mode: str,
+) -> str:
     delta = current_mv - prior_mv
     direction = "增加" if delta >= 0 else "减少"
+    baseline = "年初" if comparison_mode == "年初以来" else "对比月"
+    period = "年初以来" if comparison_mode == "年初以来" else "本月"
     risk_items = [f"{name}{count}条" for name, count in quality.items() if count > 0]
     risk_text = "；".join(risk_items) if risk_items else "未发现主要数据质量提示"
     return (
-        f"本月全价市值为 {amount(current_mv)}，较对比月{direction} {amount(abs(delta))}；"
-        f"本月财务收益为 {amount(finance)}，综合收益为 {amount(comprehensive)}。"
+        f"当前全价市值为 {amount(current_mv)}，较{baseline}{direction} {amount(abs(delta))}；"
+        f"{period}财务收益为 {amount(finance)}，综合收益为 {amount(comprehensive)}。"
         f"数据质量提示：{risk_text}。"
     )
 
@@ -349,13 +390,18 @@ def main() -> None:
 
     with st.sidebar:
         current_month = st.selectbox("当前月份", months, index=months.index(default_current))
+        comparison_mode = st.selectbox("对比口径", ["较所选月份", "年初以来"], index=0)
         prior_candidates = [month for month in months if month < current_month]
-        if not prior_candidates:
+        if not prior_candidates and comparison_mode == "较所选月份":
             st.error("当前月份之前没有可对比月份。")
             st.stop()
-        prior_month = st.selectbox("对比月份", prior_candidates, index=len(prior_candidates) - 1)
+        if comparison_mode == "较所选月份":
+            prior_month = st.selectbox("对比月份", prior_candidates, index=len(prior_candidates) - 1)
+        else:
+            prior_month = default_prior
+            st.caption("年初以来口径使用源表年初市值、本年以来收益、本年以来平均资金占用；对比月份不参与主表计算。")
 
-    account_summary = current_vs_prior(data, current_month, prior_month, ["account_bucket"])
+    account_summary = comparison_summary(data, current_month, prior_month, ["account_bucket"], comparison_mode)
     account_options = [ALL] + sorted(account_summary["account_bucket"].astype(str).tolist())
 
     with st.sidebar:
@@ -383,7 +429,8 @@ def main() -> None:
             st.rerun()
 
     st.info(
-        f"当前筛选：当前月份 {current_month}；对比月份 {prior_month}；"
+        f"当前筛选：当前月份 {current_month}；对比口径 {comparison_mode}；"
+        f"{'对比月份 ' + prior_month + '；' if comparison_mode == '较所选月份' else ''}"
         f"账户 {selected_label(selected_account)}；投资品种 {selected_label(selected_asset_class)}；"
         f"投资经理 {selected_label(selected_manager)}。"
     )
@@ -391,11 +438,23 @@ def main() -> None:
     current_slice = data[data["snapshot_month"] == current_month]
     prior_slice = data[data["snapshot_month"] == prior_month]
     current_mv = float(current_slice["full_market_value"].sum())
-    prior_mv = float(prior_slice["full_market_value"].sum())
-    current_fin = float(current_slice["finance_income_mtd"].sum())
-    current_comp = float(current_slice["comprehensive_income_mtd"].sum())
-    current_capital = float(current_slice["avg_capital_mtd"].sum())
-    quality = quality_metrics(data, current_month)
+    if comparison_mode == "年初以来":
+        prior_mv = float(current_slice["market_value_year_open"].sum())
+        current_fin = float(current_slice["finance_income_ytd"].sum())
+        current_comp = float(current_slice["comprehensive_income_ytd"].sum())
+        current_capital = float(current_slice["avg_capital_ytd"].sum())
+        period_label = "年初以来"
+        baseline_label = "年初"
+        capital_label = "本年以来平均资金占用"
+    else:
+        prior_mv = float(prior_slice["full_market_value"].sum())
+        current_fin = float(current_slice["finance_income_mtd"].sum())
+        current_comp = float(current_slice["comprehensive_income_mtd"].sum())
+        current_capital = float(current_slice["avg_capital_mtd"].sum())
+        period_label = "本月"
+        baseline_label = "对比月份"
+        capital_label = "平均资金占用"
+    quality = quality_metrics(data, current_month, comparison_mode)
 
     st.subheader("数据质量提示")
     show_block_note("本提示用于提醒阅读者哪些数据需要谨慎解释，不改变源表数值，也不参与收益贡献计算。")
@@ -403,19 +462,19 @@ def main() -> None:
 
     st.subheader("本月总体表现")
     show_block_note(
-        "顶部指标均为当前月份全组合源表逐行加总；市值变化 = 当前月份全价市值 - 对比月份全价市值。"
+        f"顶部指标均为当前月份全组合源表逐行加总；市值变化 = 当前月份全价市值 - {baseline_label}全价市值；收益与资金占用采用{period_label}口径。"
     )
     top_cols = st.columns(5)
     top_cols[0].metric("当前全价市值", amount(current_mv), signed_amount(current_mv - prior_mv))
-    top_cols[1].metric("本月财务收益", amount(current_fin))
-    top_cols[2].metric("本月综合收益", amount(current_comp))
-    top_cols[3].metric("平均资金占用", amount(current_capital))
+    top_cols[1].metric(f"{period_label}财务收益", amount(current_fin))
+    top_cols[2].metric(f"{period_label}综合收益", amount(current_comp))
+    top_cols[3].metric(capital_label, amount(current_capital))
     top_cols[4].metric("快照行数", f"{len(current_slice):,}")
-    st.write(auto_summary(current_mv, prior_mv, current_fin, current_comp, quality))
+    st.write(auto_summary(current_mv, prior_mv, current_fin, current_comp, quality, comparison_mode))
 
     st.subheader("财务收益与综合收益差异")
-    show_block_note("本表用于回答财务收益和综合收益差在哪里；金额为当前月份源表逐行加总。")
-    diff_table = income_diff_breakdown(current_slice)
+    show_block_note(f"本表用于回答财务收益和综合收益差在哪里；金额为当前月份源表逐行加总，采用{period_label}口径。")
+    diff_table = income_diff_breakdown(current_slice, comparison_mode)
     st.dataframe(
         diff_table.style.format({"金额(亿)": "{:,.2f}"}, na_rep="—"),
         use_container_width=True,
@@ -426,7 +485,7 @@ def main() -> None:
 
     st.subheader("账户层：规模变化与收益贡献")
     show_block_note(
-        "本表用于回答哪个账户规模增加或减少、哪个账户贡献收益；收益率 = 本月收益 / 本月平均资金占用，资金占用无效时显示为“—”。"
+        f"本表用于回答哪个账户规模增加或减少、哪个账户贡献收益；收益率 = {period_label}收益 / {capital_label}，资金占用无效时显示为“—”。"
     )
     account_display = account_summary.sort_values("full_market_value_delta", ascending=False)
     st.dataframe(
@@ -443,15 +502,16 @@ def main() -> None:
                     "comprehensive_return_mtd",
                     "record_count_current",
                 ]
-            ]
+            ],
+            comparison_mode=comparison_mode,
         ),
         use_container_width=True,
         hide_index=True,
     )
 
     st.subheader("账户内品种拆解")
-    show_block_note("本表用于回答选定账户的钱投向哪些品种，以及这些品种分别贡献或拖累了多少收益。")
-    class_summary = current_vs_prior(data, current_month, prior_month, ["account_bucket", "asset_class"])
+    show_block_note(f"本表用于回答选定账户的钱投向哪些品种，以及这些品种在{comparison_mode}口径下分别贡献或拖累了多少收益。")
+    class_summary = comparison_summary(data, current_month, prior_month, ["account_bucket", "asset_class"], comparison_mode)
     if selected_account != ALL:
         class_summary = class_summary[class_summary["account_bucket"] == selected_account]
     class_display = class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
@@ -469,15 +529,16 @@ def main() -> None:
                     "comprehensive_return_mtd",
                     "record_count_current",
                 ]
-            ]
+            ],
+            comparison_mode=comparison_mode,
         ),
         use_container_width=True,
         hide_index=True,
     )
 
     st.subheader("品种内经理拆解")
-    show_block_note("本表用于回答选定账户和品种下，结果由哪些投资经理贡献或拖累。")
-    manager_summary = current_vs_prior(data, current_month, prior_month, ["account_bucket", "asset_class", "manager"])
+    show_block_note(f"本表用于回答选定账户和品种下，结果由哪些投资经理贡献或拖累；当前采用{comparison_mode}口径。")
+    manager_summary = comparison_summary(data, current_month, prior_month, ["account_bucket", "asset_class", "manager"], comparison_mode)
     if selected_account != ALL:
         manager_summary = manager_summary[manager_summary["account_bucket"] == selected_account]
     if selected_asset_class != ALL:
@@ -498,27 +559,42 @@ def main() -> None:
                     "comprehensive_return_mtd",
                     "record_count_current",
                 ]
-            ]
+            ],
+            comparison_mode=comparison_mode,
         ),
         use_container_width=True,
         hide_index=True,
     )
 
     st.subheader("资产证据")
-    show_block_note(
-        "本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按当前月和对比月是否出现及市值变化判断。"
-    )
-    evidence = asset_evidence(
-        data,
-        current_month,
-        prior_month,
-        selected_account,
-        selected_asset_class,
-        selected_manager,
-    )
+    if comparison_mode == "年初以来":
+        show_block_note(
+            "本表用于把账户、品种、经理的结果追溯到资产明细；变化类型基于源表年初市值与当前市值判断，不等同于逐月交易明细。"
+        )
+        evidence = asset_evidence_year_open(
+            data,
+            current_month,
+            selected_account,
+            selected_asset_class,
+            selected_manager,
+        )
+        evidence_options = ["收益贡献", "收益拖累", "规模增加", "规模减少", "年初持仓变化"]
+    else:
+        show_block_note(
+            "本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按当前月和对比月是否出现及市值变化判断。"
+        )
+        evidence = asset_evidence(
+            data,
+            current_month,
+            prior_month,
+            selected_account,
+            selected_asset_class,
+            selected_manager,
+        )
+        evidence_options = ["收益贡献", "收益拖累", "规模增加", "规模减少", "新增退出"]
     sort_choice = st.radio(
         "资产证据视角",
-        ["收益贡献", "收益拖累", "规模增加", "规模减少", "新增退出"],
+        evidence_options,
         horizontal=True,
     )
     if sort_choice == "收益贡献":
@@ -530,7 +606,16 @@ def main() -> None:
     elif sort_choice == "规模减少":
         evidence = evidence.sort_values("full_market_value_delta", ascending=True)
     else:
-        order = {"新增": 0, "退出": 1, "存续增加": 2, "存续减少": 3}
+        if comparison_mode == "年初以来":
+            order = {
+                "年初无持仓、本月有持仓": 0,
+                "年初有持仓、本月无持仓": 1,
+                "较年初增加": 2,
+                "较年初减少": 3,
+                "较年初持平": 4,
+            }
+        else:
+            order = {"新增": 0, "退出": 1, "存续增加": 2, "存续减少": 3}
         evidence = evidence.assign(_order=evidence["change_type"].map(order).fillna(9)).sort_values(
             ["_order", "full_market_value_delta"],
             ascending=[True, False],
@@ -555,7 +640,8 @@ def main() -> None:
                     "source_rows_current",
                     "source_rows_prior",
                 ]
-            ].head(500)
+            ].head(500),
+            comparison_mode=comparison_mode,
         ),
         use_container_width=True,
         hide_index=True,

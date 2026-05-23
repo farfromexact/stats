@@ -17,7 +17,9 @@ REQUIRED_FIELDS = [
     "资产分类",
     "全价市值(亿)",
     "净价市值(亿)",
+    "年初市值(亿)",
     "平均资金占用（本月以来）(亿)",
+    "平均资金占用（本年以来）(亿)",
     "财务收益（本月以来）(亿)",
     "综合收益（本月以来）(亿)",
     "财务收益（本年以来）(亿)",
@@ -37,7 +39,9 @@ FIELD_MAP = {
     "资产分类": "asset_class",
     "全价市值(亿)": "full_market_value",
     "净价市值(亿)": "clean_market_value",
+    "年初市值(亿)": "market_value_year_open",
     "平均资金占用（本月以来）(亿)": "avg_capital_mtd",
+    "平均资金占用（本年以来）(亿)": "avg_capital_ytd",
     "财务收益（本月以来）(亿)": "finance_income_mtd",
     "综合收益（本月以来）(亿)": "comprehensive_income_mtd",
     "财务收益（本年以来）(亿)": "finance_income_ytd",
@@ -47,7 +51,9 @@ FIELD_MAP = {
 NUMERIC_COLUMNS = [
     "full_market_value",
     "clean_market_value",
+    "market_value_year_open",
     "avg_capital_mtd",
+    "avg_capital_ytd",
     "finance_income_mtd",
     "comprehensive_income_mtd",
     "finance_income_ytd",
@@ -64,4 +70,3 @@ DISPLAY_METRICS = [
     "finance_return_mtd",
     "comprehensive_return_mtd",
 ]
-
