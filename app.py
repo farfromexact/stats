@@ -46,8 +46,31 @@ def apply_yacht_theme() -> None:
             color: var(--yacht-ink);
         }
 
+        section[data-testid="stSidebar"] div[data-baseweb="select"] {
+            background: var(--yacht-foam);
+            border-radius: 6px;
+        }
+
         section[data-testid="stSidebar"] input {
             color: var(--yacht-ink);
+            background: var(--yacht-foam);
+        }
+
+        section[data-testid="stSidebar"] code,
+        section[data-testid="stSidebar"] pre,
+        section[data-testid="stSidebar"] kbd {
+            color: var(--yacht-ink) !important;
+            background: var(--yacht-foam) !important;
+            border: 1px solid var(--yacht-blue);
+            border-radius: 6px;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] label,
+        section[data-testid="stSidebar"] span {
+            color: var(--yacht-foam);
         }
 
         h1, h2, h3 {
