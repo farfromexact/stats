@@ -13,6 +13,7 @@ from portfolio_data import available_months, load_snapshots
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
+DATA_SCHEMA_VERSION = "2026-05-23-ytd-comparison-v1"
 
 st.set_page_config(page_title="组合管理账户复盘", layout="wide")
 
@@ -221,8 +222,25 @@ PCT_COLUMNS = {"finance_return_mtd", "comprehensive_return_mtd"}
 
 
 @st.cache_data(show_spinner="正在读取月度宽表...")
-def cached_load(data_dir: str):
+def cached_load(data_dir: str, schema_version: str):
     return load_snapshots(Path(data_dir))
+
+
+def ensure_runtime_columns(data: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    required_runtime_columns = {
+        "market_value_year_open": 0.0,
+        "avg_capital_ytd": 0.0,
+        "finance_income_ytd": 0.0,
+        "comprehensive_income_ytd": 0.0,
+    }
+    missing = [column for column in required_runtime_columns if column not in data.columns]
+    if not missing:
+        return data, []
+
+    data = data.copy()
+    for column in missing:
+        data[column] = required_runtime_columns[column]
+    return data, missing
 
 
 def display_names_for_mode(comparison_mode: str) -> dict[str, str]:
@@ -358,7 +376,8 @@ def main() -> None:
     st.title("组合管理账户复盘")
     st.caption("第一阶段：固定文件夹读取月度宽表，围绕账户 -> 投资品种 -> 投资经理 -> 资产做筛选下钻。")
 
-    data, validation, errors = cached_load(str(DATA_DIR))
+    data, validation, errors = cached_load(str(DATA_DIR), DATA_SCHEMA_VERSION)
+    data, runtime_missing_columns = ensure_runtime_columns(data)
     with st.sidebar:
         st.header("数据与筛选")
         st.write(f"数据目录：`{DATA_DIR}`")
@@ -373,6 +392,13 @@ def main() -> None:
         if not validation.empty:
             st.dataframe(format_table(validation, precision="source"), use_container_width=True, hide_index=True)
         st.stop()
+
+    if runtime_missing_columns:
+        st.warning(
+            "当前缓存或源表缺少年初以来口径字段，已临时补空以避免页面中断；"
+            "请点击左侧“刷新数据”重新读取源文件。缺失字段："
+            + "、".join(runtime_missing_columns)
+        )
 
     months = available_months(data)
     if len(months) < 2:

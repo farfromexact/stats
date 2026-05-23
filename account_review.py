@@ -15,7 +15,10 @@ GROUP_METRICS = [
 
 
 def _aggregate(data: pd.DataFrame, month: str, group_cols: list[str]) -> pd.DataFrame:
-    subset = data[data["snapshot_month"] == month]
+    subset = data[data["snapshot_month"] == month].copy()
+    for metric in GROUP_METRICS:
+        if metric not in subset:
+            subset[metric] = 0.0
     if subset.empty:
         return pd.DataFrame(columns=group_cols + GROUP_METRICS + ["record_count"])
 
