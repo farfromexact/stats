@@ -118,6 +118,25 @@ def apply_yacht_theme() -> None:
             border-color: var(--yacht-ink);
         }
 
+        .sidebar-nav-button {
+            display: block;
+            width: fit-content;
+            margin: 0.75rem 0 1rem 0;
+            padding: 0.45rem 0.75rem;
+            background: rgba(142, 160, 182, 0.18);
+            color: var(--yacht-foam) !important;
+            border: 1px solid rgba(242, 241, 237, 0.22);
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .sidebar-nav-button:hover {
+            background: rgba(242, 241, 237, 0.16);
+            color: white !important;
+            text-decoration: none;
+        }
+
         div[data-testid="stDataFrame"] {
             border: 1px solid var(--yacht-deck);
             border-radius: 8px;
@@ -385,6 +404,10 @@ def main() -> None:
         if st.button("刷新数据"):
             st.cache_data.clear()
             st.rerun()
+        st.markdown(
+            '<a class="sidebar-nav-button" href="#overview">总览</a>',
+            unsafe_allow_html=True,
+        )
 
     if errors:
         st.error("数据校验未通过，已停止分析。")
@@ -483,10 +506,7 @@ def main() -> None:
         capital_label = "平均资金占用"
     quality = quality_metrics(data, current_month, comparison_mode)
 
-    st.subheader("数据质量提示")
-    show_block_note("本提示用于提醒阅读者哪些数据需要谨慎解释，不改变源表数值，也不参与收益贡献计算。")
-    render_quality_bar(quality)
-
+    st.markdown('<span id="overview"></span>', unsafe_allow_html=True)
     st.subheader("本月总体表现")
     show_block_note(
         f"顶部指标均为当前月份全组合源表逐行加总；市值变化 = 当前月份全价市值 - {baseline_label}全价市值；收益与资金占用采用{period_label}口径。"
@@ -498,15 +518,6 @@ def main() -> None:
     top_cols[3].metric(capital_label, amount(current_capital))
     top_cols[4].metric("快照行数", f"{len(current_slice):,}")
     st.write(auto_summary(current_mv, prior_mv, current_fin, current_comp, quality, comparison_mode))
-
-    st.subheader("财务收益与综合收益差异")
-    show_block_note(f"本表用于回答财务收益和综合收益差在哪里；金额为当前月份源表逐行加总，采用{period_label}口径。")
-    diff_table = income_diff_breakdown(current_slice, comparison_mode)
-    st.dataframe(
-        diff_table.style.format({"金额(亿)": "{:,.2f}"}, na_rep="—"),
-        use_container_width=True,
-        hide_index=True,
-    )
 
     st.divider()
 
@@ -697,6 +708,21 @@ def main() -> None:
             ].head(500),
             comparison_mode=comparison_mode,
         ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.divider()
+
+    st.subheader("数据质量提示")
+    show_block_note("本提示用于提醒阅读者哪些数据需要谨慎解释，不改变源表数值，也不参与收益贡献计算。")
+    render_quality_bar(quality)
+
+    st.subheader("财务收益与综合收益差异")
+    show_block_note(f"本表用于回答财务收益和综合收益差在哪里；金额为当前月份源表逐行加总，采用{period_label}口径。")
+    diff_table = income_diff_breakdown(current_slice, comparison_mode)
+    st.dataframe(
+        diff_table.style.format({"金额(亿)": "{:,.2f}"}, na_rep="—"),
         use_container_width=True,
         hide_index=True,
     )
