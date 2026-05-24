@@ -177,6 +177,7 @@ DISPLAY_NAMES = {
     "finance_income_mtd": "本月财务收益(亿)",
     "comprehensive_income_mtd": "本月综合收益(亿)",
     "account_bucket": "账户",
+    "mandate_type": "委受托维度",
     "asset_class": "投资品种",
     "manager": "投资经理",
     "asset_name": "资产名称",
@@ -519,6 +520,33 @@ def main() -> None:
             account_display[
                 [
                     "account_bucket",
+                    "full_market_value_current",
+                    "full_market_value_prior",
+                    "full_market_value_delta",
+                    "finance_income_mtd_current",
+                    "comprehensive_income_mtd_current",
+                    "finance_return_mtd",
+                    "comprehensive_return_mtd",
+                    "record_count_current",
+                ]
+            ],
+            comparison_mode=comparison_mode,
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("委受托维度：规模变化与收益贡献")
+    show_block_note(
+        f"本表用于回答不同委受托关系下的规模、收益贡献和变化情况；当前采用{comparison_mode}口径，不参与左侧筛选链路。"
+    )
+    mandate_summary = comparison_summary(data, current_month, prior_month, ["mandate_type"], comparison_mode)
+    mandate_display = mandate_summary.sort_values("full_market_value_delta", ascending=False)
+    st.dataframe(
+        format_table(
+            mandate_display[
+                [
+                    "mandate_type",
                     "full_market_value_current",
                     "full_market_value_prior",
                     "full_market_value_delta",
