@@ -45,6 +45,21 @@ def _clean_label(series: pd.Series, fallback: str) -> pd.Series:
     return values.mask(values.isin(["", "-", "缺省", "nan", "None"]), fallback)
 
 
+def _read_wide_sheet(path: Path) -> tuple[pd.DataFrame, str, list[str]]:
+    workbook = pd.ExcelFile(path)
+    best_sheet = ""
+    best_missing = REQUIRED_FIELDS
+    for sheet_name in workbook.sheet_names:
+        header = pd.read_excel(workbook, sheet_name=sheet_name, nrows=0)
+        missing = [field for field in REQUIRED_FIELDS if field not in header.columns]
+        if len(missing) < len(best_missing):
+            best_sheet = sheet_name
+            best_missing = missing
+        if not missing:
+            return pd.read_excel(workbook, sheet_name=sheet_name), sheet_name, []
+    return pd.DataFrame(), best_sheet, best_missing
+
+
 def _read_one(path: Path) -> tuple[pd.DataFrame | None, dict]:
     snapshot = _snapshot_month(path.name)
     log = {
@@ -54,18 +69,19 @@ def _read_one(path: Path) -> tuple[pd.DataFrame | None, dict]:
         "source_rows": 0,
         "status": "OK",
         "message": "",
+        "sheet_name": "",
         "full_market_value": 0.0,
         "finance_income_mtd": 0.0,
         "comprehensive_income_mtd": 0.0,
     }
     try:
-        raw = pd.read_excel(path, sheet_name=0)
+        raw, sheet_name, missing = _read_wide_sheet(path)
+        log["sheet_name"] = sheet_name
     except Exception as exc:  # pragma: no cover - surfaced in Streamlit
         log["status"] = "ERROR"
         log["message"] = f"读取失败：{exc}"
         return None, log
 
-    missing = [field for field in REQUIRED_FIELDS if field not in raw.columns]
     if missing:
         log["status"] = "ERROR"
         log["message"] = "缺少必需字段：" + "、".join(missing)
