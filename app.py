@@ -521,6 +521,33 @@ def main() -> None:
 
     st.divider()
 
+    st.subheader("投资品种总览：规模变化与收益贡献")
+    show_block_note(
+        f"本表不分账户，直接按投资品种汇总，用于回答股票、债券、存款等品种分别挣了多少钱；当前采用{comparison_mode}口径。"
+    )
+    asset_class_summary = comparison_summary(data, current_month, prior_month, ["asset_class"], comparison_mode)
+    asset_class_display = asset_class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
+    st.dataframe(
+        format_table(
+            asset_class_display[
+                [
+                    "asset_class",
+                    "full_market_value_current",
+                    "full_market_value_prior",
+                    "full_market_value_delta",
+                    "finance_income_mtd_current",
+                    "comprehensive_income_mtd_current",
+                    "finance_return_mtd",
+                    "comprehensive_return_mtd",
+                    "record_count_current",
+                ]
+            ],
+            comparison_mode=comparison_mode,
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
     st.subheader("账户层：规模变化与收益贡献")
     show_block_note(
         f"本表用于回答哪个账户规模增加或减少、哪个账户贡献收益；收益率 = {period_label}收益 / {capital_label}，资金占用无效时显示为“—”。"
