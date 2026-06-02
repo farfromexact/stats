@@ -13,7 +13,7 @@ from portfolio_data import available_months, load_snapshots
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
-DATA_SCHEMA_VERSION = "2026-05-23-ytd-comparison-v1"
+DATA_SCHEMA_VERSION = "2026-06-02-may-snapshot-v1"
 
 st.set_page_config(page_title="组合管理账户复盘", layout="wide")
 
