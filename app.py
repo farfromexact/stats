@@ -1,11 +1,17 @@
-from pathlib import Path
 import hmac
 import os
+from html import escape
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import altair as alt
 import streamlit as st
+
+try:
+    from streamlit.errors import StreamlitSecretNotFoundError
+except ImportError:  # pragma: no cover - compatibility with older Streamlit
+    StreamlitSecretNotFoundError = RuntimeError
 
 from account_review import asset_evidence, asset_evidence_year_open, comparison_summary
 from config import DATA_DIR
@@ -107,6 +113,156 @@ def apply_yacht_theme() -> None:
             color: var(--yacht-ink);
         }
 
+        .filter-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            margin: 0.55rem 0 1rem 0;
+        }
+
+        .filter-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.32rem 0.55rem;
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid var(--yacht-deck);
+            border-radius: 6px;
+            color: var(--yacht-ink);
+            font-size: 0.86rem;
+            line-height: 1.25;
+        }
+
+        .filter-pill span {
+            color: #5B6472;
+            font-weight: 600;
+        }
+
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+            gap: 0.8rem;
+            margin: 0.65rem 0 0.85rem 0;
+        }
+
+        .kpi-card {
+            min-height: 96px;
+            background: rgba(255, 255, 255, 0.78);
+            border: 1px solid var(--yacht-deck);
+            border-left: 4px solid var(--yacht-blue);
+            border-radius: 8px;
+            padding: 0.78rem 0.9rem;
+            box-shadow: 0 2px 10px rgba(13, 7, 7, 0.05);
+        }
+
+        .kpi-label {
+            color: var(--yacht-navy);
+            font-size: 0.84rem;
+            font-weight: 700;
+            line-height: 1.25;
+            margin-bottom: 0.45rem;
+        }
+
+        .kpi-value {
+            color: var(--yacht-ink);
+            font-size: 1.58rem;
+            font-weight: 760;
+            line-height: 1.16;
+            overflow-wrap: anywhere;
+        }
+
+        .kpi-delta {
+            display: inline-block;
+            margin-top: 0.45rem;
+            color: #0F6F3F;
+            background: #E9F5ED;
+            border-radius: 999px;
+            padding: 0.12rem 0.42rem;
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+
+        .decision-summary {
+            margin: 0.35rem 0 0.6rem 0;
+            color: var(--yacht-ink);
+            font-size: 1rem;
+            line-height: 1.65;
+        }
+
+        .action-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 0.7rem;
+            margin: 0.8rem 0 1rem 0;
+        }
+
+        .action-card {
+            display: block;
+            min-height: 92px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid var(--yacht-deck);
+            border-radius: 8px;
+            padding: 0.78rem 0.85rem;
+            color: var(--yacht-ink) !important;
+            text-decoration: none;
+            box-shadow: 0 2px 10px rgba(13, 7, 7, 0.04);
+        }
+
+        .action-card,
+        .action-card * {
+            text-decoration: none !important;
+        }
+
+        .action-card:hover {
+            border-color: var(--yacht-blue);
+            text-decoration: none;
+        }
+
+        .action-title {
+            color: var(--yacht-navy);
+            font-weight: 760;
+            margin-bottom: 0.28rem;
+        }
+
+        .action-copy {
+            color: #475569;
+            font-size: 0.88rem;
+            line-height: 1.42;
+        }
+
+        .quality-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+            gap: 0.55rem;
+            margin: 0.8rem 0 0.6rem 0;
+        }
+
+        .quality-card {
+            background: rgba(255, 255, 255, 0.78);
+            border: 1px solid var(--yacht-deck);
+            border-radius: 8px;
+            padding: 0.65rem 0.75rem;
+        }
+
+        .quality-card.hot {
+            border-color: #C88439;
+            background: #FFF7E8;
+        }
+
+        .quality-label {
+            color: #475569;
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-bottom: 0.2rem;
+        }
+
+        .quality-value {
+            color: var(--yacht-ink);
+            font-size: 1.35rem;
+            font-weight: 760;
+            line-height: 1.12;
+        }
+
         div[data-testid="stAlert"] {
             border-radius: 8px;
             border-color: var(--yacht-blue);
@@ -194,8 +350,11 @@ def apply_yacht_theme() -> None:
 
 def _configured_password() -> str | None:
     """Read the app password from deployment-safe config, not source code."""
-    if "app_password" in st.secrets:
-        return str(st.secrets["app_password"])
+    try:
+        if "app_password" in st.secrets:
+            return str(st.secrets["app_password"])
+    except StreamlitSecretNotFoundError:
+        pass
     return os.environ.get("PORTFOLIO_APP_PASSWORD")
 
 
@@ -342,6 +501,137 @@ def signed_amount(value: float) -> str:
         return "—"
     sign = "+" if value >= 0 else ""
     return f"{sign}{value:,.2f} 亿"
+
+
+def html_text(value: object) -> str:
+    return escape(str(value), quote=True)
+
+
+def render_filter_pills(
+    current_month: str,
+    comparison_mode: str,
+    prior_month: str,
+    selected_account: str,
+    selected_asset_class: str,
+    selected_manager: str,
+) -> None:
+    items = [
+        ("当前月份", current_month),
+        ("对比口径", comparison_mode),
+    ]
+    if comparison_mode == "较所选月份":
+        items.append(("对比月份", prior_month))
+    items.extend(
+        [
+            ("账户", selected_label(selected_account)),
+            ("投资品种", selected_label(selected_asset_class)),
+            ("投资经理", selected_label(selected_manager)),
+        ]
+    )
+    pills = "".join(
+        f'<div class="filter-pill"><span>{html_text(label)}</span>{html_text(value)}</div>'
+        for label, value in items
+    )
+    st.markdown(f'<div class="filter-pills">{pills}</div>', unsafe_allow_html=True)
+
+
+def render_kpi_grid(items: list[dict[str, str]]) -> None:
+    cards = []
+    for item in items:
+        delta = item.get("delta", "")
+        delta_html = f'<div class="kpi-delta">{html_text(delta)}</div>' if delta else ""
+        cards.append(
+            '<div class="kpi-card"><div class="kpi-label">{label}</div>'
+            '<div class="kpi-value">{value}</div>{delta}</div>'.format(
+                label=html_text(item["label"]),
+                value=html_text(item["value"]),
+                delta=delta_html,
+            )
+        )
+    st.markdown(f'<div class="kpi-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+
+def metric_extreme(frame: pd.DataFrame, label_col: str, metric: str, ascending: bool) -> tuple[str, float] | None:
+    if frame.empty or label_col not in frame or metric not in frame:
+        return None
+    working = frame.copy()
+    working[metric] = _numeric_series(working, metric)
+    working = working[working[metric].abs() > CHART_EPSILON]
+    if working.empty:
+        return None
+    row = working.sort_values(metric, ascending=ascending).iloc[0]
+    return str(row[label_col]), float(row[metric])
+
+
+def render_decision_summary(
+    current_month: str,
+    prior_month: str,
+    comparison_mode: str,
+    current_mv: float,
+    prior_mv: float,
+    current_comp: float,
+    asset_class_summary: pd.DataFrame,
+    quality: dict[str, int],
+) -> None:
+    baseline = "年初" if comparison_mode == "年初以来" else prior_month
+    mv_delta = current_mv - prior_mv
+    mv_direction = "增加" if mv_delta >= 0 else "减少"
+    top_gain = metric_extreme(asset_class_summary, "asset_class", "comprehensive_income_mtd_current", False)
+    top_drag = metric_extreme(asset_class_summary, "asset_class", "comprehensive_income_mtd_current", True)
+    gain_text = "暂无明显收益来源"
+    if top_gain is not None:
+        gain_text = f"主要收益来源是 {top_gain[0]}，贡献 {amount(top_gain[1])}"
+    drag_text = "未出现明显负贡献品种"
+    if top_drag is not None and top_drag[1] < -CHART_EPSILON:
+        drag_text = f"主要拖累是 {top_drag[0]}，贡献 {amount(top_drag[1])}"
+    quality_count = sum(count for count in quality.values() if count > 0)
+    quality_text = (
+        f"有 {quality_count:,} 项质量提示需要核对"
+        if quality_count
+        else "当前未发现主要质量提示"
+    )
+    st.markdown(
+        (
+            '<p class="decision-summary">'
+            f"{html_text(current_month)} 全价市值 {html_text(amount(current_mv))}，"
+            f"较 {html_text(baseline)} {html_text(mv_direction)} {html_text(amount(abs(mv_delta)))}；"
+            f"综合收益 {html_text(amount(current_comp))}。"
+            f"{html_text(gain_text)}；{html_text(drag_text)}；{html_text(quality_text)}。"
+            "</p>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def render_action_cards() -> None:
+    actions = [
+        ("看收益来源", "先看哪些投资品种贡献了本月结果。", "#asset-class-overview"),
+        ("追资产证据", "把收益贡献、拖累和规模变化落到单项资产。", "#asset-evidence"),
+        ("核对数据质量", "优先处理未分配经理、异常收益率和负收益资产。", "#quality-checks"),
+    ]
+    cards = "".join(
+        '<a class="action-card" href="{href}"><div class="action-title">{title}</div>'
+        '<div class="action-copy">{copy}</div></a>'.format(
+            href=html_text(href),
+            title=html_text(title),
+            copy=html_text(copy),
+        )
+        for title, copy, href in actions
+    )
+    st.markdown(f'<div class="action-grid">{cards}</div>', unsafe_allow_html=True)
+
+
+def render_quality_signal(quality: dict[str, int]) -> None:
+    cards = "".join(
+        '<div class="quality-card {state}"><div class="quality-label">{label}</div>'
+        '<div class="quality-value">{value}</div></div>'.format(
+            state="hot" if count > 0 else "",
+            label=html_text(label),
+            value=html_text(f"{count:,}"),
+        )
+        for label, count in quality.items()
+    )
+    st.markdown(f'<div class="quality-grid">{cards}</div>', unsafe_allow_html=True)
 
 
 def selected_label(value: str) -> str:
@@ -859,13 +1149,14 @@ def main() -> None:
     require_login()
 
     st.title("组合管理账户复盘")
-    st.caption("第一阶段：固定文件夹读取月度宽表，围绕账户 -> 投资品种 -> 投资经理 -> 资产做筛选下钻。")
+    st.caption("看组合规模、收益贡献、数据质量，并追到资产证据。")
 
     data, validation, errors = cached_load(str(DATA_DIR), DATA_SCHEMA_VERSION)
     data, runtime_missing_columns = ensure_runtime_columns(data)
     with st.sidebar:
         st.header("数据与筛选")
-        st.write(f"数据目录：`{DATA_DIR}`")
+        with st.expander("数据源", expanded=False):
+            st.write(f"数据目录：`{DATA_DIR}`")
         if st.button("刷新数据"):
             st.cache_data.clear()
             st.rerun()
@@ -876,7 +1167,7 @@ def main() -> None:
         for error in errors:
             st.write(f"- {error}")
         if not validation.empty:
-            st.dataframe(format_table(validation, precision="source"), use_container_width=True, hide_index=True)
+            st.dataframe(format_table(validation, precision="source"), width="stretch", hide_index=True)
         st.stop()
 
     if runtime_missing_columns:
@@ -940,11 +1231,13 @@ def main() -> None:
             st.session_state["reset_filters"] = True
             st.rerun()
 
-    st.info(
-        f"当前筛选：当前月份 {current_month}；对比口径 {comparison_mode}；"
-        f"{'对比月份 ' + prior_month + '；' if comparison_mode == '较所选月份' else ''}"
-        f"账户 {selected_label(selected_account)}；投资品种 {selected_label(selected_asset_class)}；"
-        f"投资经理 {selected_label(selected_manager)}。"
+    render_filter_pills(
+        current_month,
+        comparison_mode,
+        prior_month,
+        selected_account,
+        selected_asset_class,
+        selected_manager,
     )
 
     current_slice = data[data["snapshot_month"] == current_month]
@@ -967,19 +1260,34 @@ def main() -> None:
         baseline_label = "对比月份"
         capital_label = "平均资金占用"
     quality = quality_metrics(data, current_month, comparison_mode)
+    asset_class_summary = comparison_summary(data, current_month, prior_month, ["asset_class"], comparison_mode)
 
     section_anchor("overview")
     st.subheader("本月总体表现")
+    render_decision_summary(
+        current_month,
+        prior_month,
+        comparison_mode,
+        current_mv,
+        prior_mv,
+        current_comp,
+        asset_class_summary,
+        quality,
+    )
+    render_kpi_grid(
+        [
+            {"label": "当前全价市值", "value": amount(current_mv), "delta": signed_amount(current_mv - prior_mv)},
+            {"label": f"{period_label}财务收益", "value": amount(current_fin)},
+            {"label": f"{period_label}综合收益", "value": amount(current_comp)},
+            {"label": capital_label, "value": amount(current_capital)},
+            {"label": "快照行数", "value": f"{len(current_slice):,}"},
+        ]
+    )
+    render_action_cards()
+    render_quality_signal(quality)
     show_block_note(
         f"顶部指标均为当前月份全组合源表逐行加总；市值变化 = 当前月份全价市值 - {baseline_label}全价市值；收益与资金占用采用{period_label}口径。"
     )
-    top_cols = st.columns(5)
-    top_cols[0].metric("当前全价市值", amount(current_mv), signed_amount(current_mv - prior_mv))
-    top_cols[1].metric(f"{period_label}财务收益", amount(current_fin))
-    top_cols[2].metric(f"{period_label}综合收益", amount(current_comp))
-    top_cols[3].metric(capital_label, amount(current_capital))
-    top_cols[4].metric("快照行数", f"{len(current_slice):,}")
-    st.write(auto_summary(current_mv, prior_mv, current_fin, current_comp, quality, comparison_mode))
 
     section_anchor("charts-overview")
     st.subheader("图表总览")
@@ -993,7 +1301,6 @@ def main() -> None:
     show_block_note(
         f"本表不分账户，直接按投资品种汇总，用于回答股票、债券、存款等品种分别挣了多少钱；当前采用{comparison_mode}口径。"
     )
-    asset_class_summary = comparison_summary(data, current_month, prior_month, ["asset_class"], comparison_mode)
     asset_class_display = asset_class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
     asset_chart_cols = st.columns(2)
     with asset_chart_cols[0]:
@@ -1034,7 +1341,7 @@ def main() -> None:
             ],
             comparison_mode=comparison_mode,
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     back_to_charts_link()
@@ -1074,7 +1381,7 @@ def main() -> None:
             ],
             comparison_mode=comparison_mode,
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     back_to_charts_link()
@@ -1104,7 +1411,7 @@ def main() -> None:
             ],
             comparison_mode=comparison_mode,
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     back_to_charts_link()
@@ -1135,7 +1442,7 @@ def main() -> None:
             ],
             comparison_mode=comparison_mode,
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     back_to_charts_link()
@@ -1168,7 +1475,7 @@ def main() -> None:
             ],
             comparison_mode=comparison_mode,
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     back_to_charts_link()
@@ -1251,7 +1558,7 @@ def main() -> None:
             ].head(500),
             comparison_mode=comparison_mode,
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     back_to_charts_link()
@@ -1268,13 +1575,13 @@ def main() -> None:
     diff_table = income_diff_breakdown(current_slice, comparison_mode)
     st.dataframe(
         diff_table.style.format({"金额(亿)": "{:,.2f}"}, na_rep="—"),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
     with st.expander("源数据核对"):
         st.caption("源数据核对页保留 4 位小数，便于和原始宽表汇总结果复核。")
-        st.dataframe(format_table(validation, precision="source"), use_container_width=True, hide_index=True)
+        st.dataframe(format_table(validation, precision="source"), width="stretch", hide_index=True)
 
 
 if __name__ == "__main__":
