@@ -588,18 +588,46 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         return
 
     month_order = monthly["snapshot_month"].astype(str).tolist()
-    market_chart = (
+    market_min = float(monthly["full_market_value"].min())
+    market_max = float(monthly["full_market_value"].max())
+    market_padding = max((market_max - market_min) * 0.25, market_max * 0.004)
+    market_baseline = max(0.0, market_min - market_padding)
+    monthly["market_baseline"] = market_baseline
+
+    market_bars = (
         alt.Chart(monthly)
-        .mark_line(point=True, color=POSITIVE_COLOR, strokeWidth=3)
+        .mark_bar(color=POSITIVE_COLOR, cornerRadiusTopLeft=4, cornerRadiusTopRight=4, width=44)
         .encode(
-            x=alt.X("snapshot_month:N", title="月份", sort=month_order),
-            y=alt.Y("full_market_value:Q", title="全价市值(亿)", scale=alt.Scale(zero=False)),
+            x=alt.X(
+                "snapshot_month:N",
+                title=None,
+                sort=month_order,
+                axis=alt.Axis(labelAngle=0),
+            ),
+            y=alt.Y(
+                "full_market_value:Q",
+                title="全价市值(亿)",
+                scale=alt.Scale(domain=[market_baseline, market_max + market_padding]),
+            ),
+            y2="market_baseline:Q",
             tooltip=[
                 alt.Tooltip("snapshot_month:N", title="月份"),
                 alt.Tooltip("full_market_value:Q", title="全价市值(亿)", format=",.2f"),
             ],
         )
-        .properties(title="全组合市值趋势", height=260)
+    )
+    market_labels = (
+        alt.Chart(monthly)
+        .mark_text(dy=-8, color=POSITIVE_COLOR, fontWeight=600)
+        .encode(
+            x=alt.X("snapshot_month:N", sort=month_order),
+            y=alt.Y("full_market_value:Q", scale=alt.Scale(domain=[market_baseline, market_max + market_padding])),
+            text=alt.Text("full_market_value:Q", format=",.0f"),
+        )
+    )
+    market_chart = (
+        (market_bars + market_labels)
+        .properties(title="全组合市值", height=300)
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
@@ -618,9 +646,15 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     )
     income_chart = (
         alt.Chart(income_long)
-        .mark_line(point=True, strokeWidth=3)
+        .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
         .encode(
-            x=alt.X("snapshot_month:N", title="月份", sort=month_order),
+            x=alt.X(
+                "snapshot_month:N",
+                title=None,
+                sort=month_order,
+                axis=alt.Axis(labelAngle=0),
+            ),
+            xOffset=alt.XOffset("income_type:N", sort=[finance_label, comprehensive_label]),
             y=alt.Y("income_value:Q", title="收益(亿)"),
             color=alt.Color(
                 "income_type:N",
@@ -637,12 +671,12 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
                 alt.Tooltip("income_value:Q", title="收益(亿)", format=",.2f"),
             ],
         )
-        .properties(title=f"{comparison_mode}收益趋势", height=260)
+        .properties(title=f"{comparison_mode}收益", height=300)
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
 
-    trend_cols = st.columns(2)
+    trend_cols = st.columns([0.9, 1.1])
     trend_cols[0].altair_chart(market_chart, width="stretch")
     trend_cols[1].altair_chart(income_chart, width="stretch")
 
@@ -872,7 +906,7 @@ def main() -> None:
 
     section_anchor("charts-overview")
     st.subheader("图表总览")
-    show_block_note(f"趋势图按全组合逐月汇总；收益曲线采用{period_label}口径，市值曲线始终展示各月全价市值。")
+    show_block_note(f"柱状图按全组合逐月汇总；收益采用{period_label}口径，市值展示各月全价市值。")
     render_monthly_trends(data, comparison_mode)
 
     st.divider()
