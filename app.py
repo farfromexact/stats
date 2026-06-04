@@ -125,21 +125,42 @@ def apply_yacht_theme() -> None:
 
         .sidebar-nav-button {
             display: block;
-            width: fit-content;
-            margin: 0.75rem 0 1rem 0;
-            padding: 0.45rem 0.75rem;
+            width: 100%;
+            margin: 0.35rem 0;
+            padding: 0.42rem 0.65rem;
             background: rgba(142, 160, 182, 0.18);
             color: var(--yacht-foam) !important;
             border: 1px solid rgba(242, 241, 237, 0.22);
             border-radius: 6px;
             text-decoration: none;
             font-weight: 600;
+            font-size: 0.9rem;
         }
 
         .sidebar-nav-button:hover {
             background: rgba(242, 241, 237, 0.16);
             color: white !important;
             text-decoration: none;
+        }
+
+        .sidebar-nav-title {
+            margin: 1rem 0 0.4rem 0;
+            color: var(--yacht-foam) !important;
+            font-weight: 700;
+            opacity: 0.9;
+        }
+
+        .inline-nav-link {
+            display: inline-block;
+            margin: 0.35rem 0 0.8rem 0;
+            color: var(--yacht-navy) !important;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .inline-nav-link:hover {
+            color: var(--yacht-ink) !important;
+            text-decoration: underline;
         }
 
         div[data-testid="stDataFrame"] {
@@ -329,6 +350,33 @@ def show_block_note(text: str) -> None:
     st.caption(f"口径说明：{text}")
 
 
+def section_anchor(anchor_id: str) -> None:
+    st.markdown(f'<span id="{anchor_id}"></span>', unsafe_allow_html=True)
+
+
+def back_to_charts_link() -> None:
+    st.markdown(
+        '<a class="inline-nav-link" href="#charts-overview">返回图表总览</a>',
+        unsafe_allow_html=True,
+    )
+
+
+def sidebar_nav() -> None:
+    st.markdown(
+        """
+        <div class="sidebar-nav-title">页面导航</div>
+        <a class="sidebar-nav-button" href="#overview">本月总体表现</a>
+        <a class="sidebar-nav-button" href="#charts-overview">图表总览</a>
+        <a class="sidebar-nav-button" href="#asset-class-overview">投资品种图表/表格</a>
+        <a class="sidebar-nav-button" href="#account-overview">账户层图表/表格</a>
+        <a class="sidebar-nav-button" href="#account-class-breakdown">账户内品种拆解</a>
+        <a class="sidebar-nav-button" href="#asset-evidence">资产证据</a>
+        <a class="sidebar-nav-button" href="#quality-checks">数据质量</a>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def quality_metrics(data: pd.DataFrame, current_month: str, comparison_mode: str) -> dict[str, int]:
     current = data[data["snapshot_month"] == current_month]
     unassigned_manager = int((current["manager"] == "未分配/待确认").sum())
@@ -439,7 +487,7 @@ def top_by_abs(frame: pd.DataFrame, metric: str, limit: int) -> pd.DataFrame:
 
 
 def _bar_height(row_count: int) -> int:
-    return max(180, min(430, row_count * 28 + 60))
+    return max(240, min(720, row_count * 36 + 120))
 
 
 def render_bar_chart(
@@ -710,10 +758,7 @@ def main() -> None:
         if st.button("刷新数据"):
             st.cache_data.clear()
             st.rerun()
-        st.markdown(
-            '<a class="sidebar-nav-button" href="#overview">总览</a>',
-            unsafe_allow_html=True,
-        )
+        sidebar_nav()
 
     if errors:
         st.error("数据校验未通过，已停止分析。")
@@ -812,7 +857,7 @@ def main() -> None:
         capital_label = "平均资金占用"
     quality = quality_metrics(data, current_month, comparison_mode)
 
-    st.markdown('<span id="overview"></span>', unsafe_allow_html=True)
+    section_anchor("overview")
     st.subheader("本月总体表现")
     show_block_note(
         f"顶部指标均为当前月份全组合源表逐行加总；市值变化 = 当前月份全价市值 - {baseline_label}全价市值；收益与资金占用采用{period_label}口径。"
@@ -825,12 +870,14 @@ def main() -> None:
     top_cols[4].metric("快照行数", f"{len(current_slice):,}")
     st.write(auto_summary(current_mv, prior_mv, current_fin, current_comp, quality, comparison_mode))
 
+    section_anchor("charts-overview")
     st.subheader("图表总览")
     show_block_note(f"趋势图按全组合逐月汇总；收益曲线采用{period_label}口径，市值曲线始终展示各月全价市值。")
     render_monthly_trends(data, comparison_mode)
 
     st.divider()
 
+    section_anchor("asset-class-overview")
     st.subheader("投资品种总览：规模变化与收益贡献")
     show_block_note(
         f"本表不分账户，直接按投资品种汇总，用于回答股票、债券、存款等品种分别挣了多少钱；当前采用{comparison_mode}口径。"
@@ -879,7 +926,9 @@ def main() -> None:
         use_container_width=True,
         hide_index=True,
     )
+    back_to_charts_link()
 
+    section_anchor("account-overview")
     st.subheader("账户层：规模变化与收益贡献")
     show_block_note(
         f"本表用于回答哪个账户规模增加或减少、哪个账户贡献收益；收益率 = {period_label}收益 / {capital_label}，资金占用无效时显示为“—”。"
@@ -917,7 +966,9 @@ def main() -> None:
         use_container_width=True,
         hide_index=True,
     )
+    back_to_charts_link()
 
+    section_anchor("mandate-overview")
     st.subheader("委受托维度：规模变化与收益贡献")
     show_block_note(
         f"本表用于回答不同委受托关系下的规模、收益贡献和变化情况；当前采用{comparison_mode}口径，不参与左侧筛选链路。"
@@ -945,7 +996,9 @@ def main() -> None:
         use_container_width=True,
         hide_index=True,
     )
+    back_to_charts_link()
 
+    section_anchor("account-class-breakdown")
     st.subheader("账户内品种拆解")
     show_block_note(f"本表用于回答选定账户的钱投向哪些品种，以及这些品种在{comparison_mode}口径下分别贡献或拖累了多少收益。")
     class_summary = comparison_summary(data, current_month, prior_month, ["account_bucket", "asset_class"], comparison_mode)
@@ -974,7 +1027,9 @@ def main() -> None:
         use_container_width=True,
         hide_index=True,
     )
+    back_to_charts_link()
 
+    section_anchor("manager-breakdown")
     st.subheader("品种内经理拆解")
     show_block_note(f"本表用于回答选定账户和品种下，结果由哪些投资经理贡献或拖累；当前采用{comparison_mode}口径。")
     manager_summary = comparison_summary(data, current_month, prior_month, ["account_bucket", "asset_class", "manager"], comparison_mode)
@@ -1005,7 +1060,9 @@ def main() -> None:
         use_container_width=True,
         hide_index=True,
     )
+    back_to_charts_link()
 
+    section_anchor("asset-evidence")
     st.subheader("资产证据")
     if comparison_mode == "年初以来":
         show_block_note(
@@ -1086,9 +1143,11 @@ def main() -> None:
         use_container_width=True,
         hide_index=True,
     )
+    back_to_charts_link()
 
     st.divider()
 
+    section_anchor("quality-checks")
     st.subheader("数据质量提示")
     show_block_note("本提示用于提醒阅读者哪些数据需要谨慎解释，不改变源表数值，也不参与收益贡献计算。")
     render_quality_bar(quality)
