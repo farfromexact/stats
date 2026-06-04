@@ -19,6 +19,8 @@ CHART_EPSILON = 1e-9
 POSITIVE_COLOR = "#122256"
 NEGATIVE_COLOR = "#8B2F2F"
 NEUTRAL_COLOR = "#8EA0B6"
+FUNDING_COLOR = "#6F7F92"
+FUNDING_ASSET_CLASSES = {"正回购", "逆回购"}
 
 st.set_page_config(page_title="组合管理账户复盘", layout="wide")
 
@@ -346,6 +348,10 @@ def selected_label(value: str) -> str:
     return "全部" if value == ALL else value
 
 
+def is_funding_asset_class(value: object) -> bool:
+    return str(value).strip() in FUNDING_ASSET_CLASSES
+
+
 def show_block_note(text: str) -> None:
     st.caption(f"口径说明：{text}")
 
@@ -513,6 +519,25 @@ def render_bar_chart(
     chart_data = chart_data.copy()
     chart_data["_label"] = chart_data[label_col].astype(str)
     chart_data["_value"] = _numeric_series(chart_data, metric)
+    chart_data["_is_funding_asset_class"] = False
+    if label_col == "asset_class":
+        chart_data["_is_funding_asset_class"] = chart_data[label_col].map(is_funding_asset_class)
+        chart_data["_color_note"] = np.where(
+            chart_data["_is_funding_asset_class"],
+            "回购/融资科目：使用中性颜色",
+            "按指标正负染色",
+        )
+    chart_data["_bar_color_group"] = np.select(
+        [
+            chart_data["_is_funding_asset_class"],
+            chart_data["_value"] >= 0,
+        ],
+        [
+            "回购/融资",
+            "正向",
+        ],
+        default="负向",
+    )
     chart_data = chart_data[chart_data["_value"].abs() > CHART_EPSILON]
     chart_data = chart_data.sort_values("_value", ascending=False)
 
@@ -520,6 +545,8 @@ def render_bar_chart(
         alt.Tooltip("_label:N", title=display_names_for_mode(comparison_mode).get(label_col, label_col)),
         alt.Tooltip("_value:Q", title=value_title, format=",.2f"),
     ]
+    if label_col == "asset_class":
+        tooltips.append(alt.Tooltip("_color_note:N", title="颜色口径"))
     for column in ["full_market_value_current", "full_market_value_delta", "comprehensive_return_mtd"]:
         if column not in chart_data.columns:
             continue
@@ -539,10 +566,14 @@ def render_bar_chart(
                 sort=alt.SortField(field="_value", order="descending"),
                 axis=alt.Axis(labelLimit=220),
             ),
-            color=alt.condition(
-                "datum._value >= 0",
-                alt.value(POSITIVE_COLOR),
-                alt.value(NEGATIVE_COLOR),
+            color=alt.Color(
+                "_bar_color_group:N",
+                title=None,
+                scale=alt.Scale(
+                    domain=["正向", "负向", "回购/融资"],
+                    range=[POSITIVE_COLOR, NEGATIVE_COLOR, FUNDING_COLOR],
+                ),
+                legend=None,
             ),
             tooltip=tooltips,
         )
@@ -729,6 +760,16 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
     ].copy()
     chart_data["account_bucket"] = chart_data["account_bucket"].astype(str)
     chart_data["asset_class"] = chart_data["asset_class"].astype(str)
+    chart_data["_is_funding_asset_class"] = chart_data["asset_class"].map(is_funding_asset_class)
+    chart_data["_heatmap_color_value"] = chart_data[metric].where(
+        ~chart_data["_is_funding_asset_class"],
+        np.nan,
+    )
+    chart_data["_color_note"] = np.where(
+        chart_data["_is_funding_asset_class"],
+        "回购/融资科目：使用中性颜色",
+        "按综合收益正负染色",
+    )
     chart_data["full_market_value_current"] = pd.to_numeric(
         chart_data["full_market_value_current"],
         errors="coerce",
@@ -754,15 +795,20 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
                 sort=class_order,
                 axis=alt.Axis(labelLimit=150),
             ),
-            color=alt.Color(
-                f"{metric}:Q",
-                title=value_title,
-                scale=alt.Scale(domainMid=0, range=[NEGATIVE_COLOR, "#F2F1ED", POSITIVE_COLOR]),
+            color=alt.condition(
+                "datum._is_funding_asset_class",
+                alt.value(FUNDING_COLOR),
+                alt.Color(
+                    "_heatmap_color_value:Q",
+                    title=value_title,
+                    scale=alt.Scale(domainMid=0, range=[NEGATIVE_COLOR, "#F2F1ED", POSITIVE_COLOR]),
+                ),
             ),
             tooltip=[
                 alt.Tooltip("account_bucket:N", title="账户"),
                 alt.Tooltip("asset_class:N", title="投资品种"),
                 alt.Tooltip(f"{metric}:Q", title=value_title, format=",.2f"),
+                alt.Tooltip("_color_note:N", title="颜色口径"),
                 alt.Tooltip("full_market_value_current:Q", title="当前全价市值(亿)", format=",.2f"),
                 alt.Tooltip("comprehensive_return_mtd:Q", title="综合收益率", format=".2%"),
             ],
@@ -775,6 +821,7 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
     st.altair_chart(chart, width="stretch")
+    st.caption("颜色说明：正回购、逆回购按回购/融资科目处理，使用中性灰蓝色，不按综合收益正负染红。")
 
 
 def main() -> None:
