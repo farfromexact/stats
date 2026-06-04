@@ -4,6 +4,7 @@ import os
 
 import numpy as np
 import pandas as pd
+import altair as alt
 import streamlit as st
 
 from account_review import asset_evidence, asset_evidence_year_open, comparison_summary
@@ -14,6 +15,10 @@ from portfolio_data import available_months, load_snapshots
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
 DATA_SCHEMA_VERSION = "2026-06-02-may-snapshot-v1"
+CHART_EPSILON = 1e-9
+POSITIVE_COLOR = "#122256"
+NEGATIVE_COLOR = "#8B2F2F"
+NEUTRAL_COLOR = "#8EA0B6"
 
 st.set_page_config(page_title="组合管理账户复盘", layout="wide")
 
@@ -142,6 +147,13 @@ def apply_yacht_theme() -> None:
             border-radius: 8px;
             overflow: hidden;
             background: white;
+        }
+
+        div[data-testid="stVegaLiteChart"] {
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid var(--yacht-deck);
+            border-radius: 8px;
+            padding: 0.35rem;
         }
 
         div[data-testid="stCaptionContainer"] {
@@ -389,6 +401,300 @@ def render_quality_bar(quality: dict[str, int]) -> None:
     )
 
 
+def _numeric_series(frame: pd.DataFrame, metric: str) -> pd.Series:
+    return pd.to_numeric(frame.get(metric, pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+
+
+def _has_chart_values(frame: pd.DataFrame, metric: str) -> bool:
+    if frame.empty or metric not in frame:
+        return False
+    return bool((_numeric_series(frame, metric).abs() > CHART_EPSILON).any())
+
+
+def top_bottom(frame: pd.DataFrame, metric: str, label_col: str, limit: int) -> pd.DataFrame:
+    if frame.empty or metric not in frame or label_col not in frame:
+        return pd.DataFrame(columns=frame.columns)
+
+    working = frame.copy()
+    working[metric] = _numeric_series(working, metric)
+    working = working[working[metric].abs() > CHART_EPSILON]
+    if working.empty:
+        return working
+
+    positive = working[working[metric] > 0].sort_values(metric, ascending=False).head(limit)
+    negative = working[working[metric] < 0].sort_values(metric, ascending=True).head(limit)
+    selected = pd.concat([positive, negative], ignore_index=True)
+    return selected.drop_duplicates(subset=[label_col], keep="first")
+
+
+def top_by_abs(frame: pd.DataFrame, metric: str, limit: int) -> pd.DataFrame:
+    if frame.empty or metric not in frame:
+        return pd.DataFrame(columns=frame.columns)
+
+    working = frame.copy()
+    working[metric] = _numeric_series(working, metric)
+    working["_abs_metric"] = working[metric].abs()
+    working = working[working["_abs_metric"] > CHART_EPSILON]
+    return working.sort_values("_abs_metric", ascending=False).head(limit)
+
+
+def _bar_height(row_count: int) -> int:
+    return max(180, min(430, row_count * 28 + 60))
+
+
+def render_bar_chart(
+    frame: pd.DataFrame,
+    metric: str,
+    label_col: str,
+    title: str,
+    value_title: str,
+    limit: int = 8,
+    selection: str = "top_bottom",
+    comparison_mode: str = "较所选月份",
+    empty_message: str = "暂无可展示的图表数据。",
+) -> None:
+    if selection == "abs":
+        chart_data = top_by_abs(frame, metric, limit)
+    else:
+        chart_data = top_bottom(frame, metric, label_col, limit)
+
+    if not _has_chart_values(chart_data, metric):
+        st.info(empty_message)
+        return
+
+    chart_data = chart_data.copy()
+    chart_data["_label"] = chart_data[label_col].astype(str)
+    chart_data["_value"] = _numeric_series(chart_data, metric)
+    chart_data = chart_data[chart_data["_value"].abs() > CHART_EPSILON]
+    chart_data = chart_data.sort_values("_value", ascending=False)
+
+    tooltips = [
+        alt.Tooltip("_label:N", title=display_names_for_mode(comparison_mode).get(label_col, label_col)),
+        alt.Tooltip("_value:Q", title=value_title, format=",.2f"),
+    ]
+    for column in ["full_market_value_current", "full_market_value_delta", "comprehensive_return_mtd"]:
+        if column not in chart_data.columns:
+            continue
+        chart_data[column] = pd.to_numeric(chart_data[column], errors="coerce")
+        tooltip_title = display_names_for_mode(comparison_mode).get(column, column)
+        tooltip_format = ".2%" if column in PCT_COLUMNS else ",.2f"
+        tooltips.append(alt.Tooltip(f"{column}:Q", title=tooltip_title, format=tooltip_format))
+
+    bars = (
+        alt.Chart(chart_data)
+        .mark_bar(cornerRadiusEnd=2)
+        .encode(
+            x=alt.X("_value:Q", title=value_title, axis=alt.Axis(format=",.1f")),
+            y=alt.Y(
+                "_label:N",
+                title=None,
+                sort=alt.SortField(field="_value", order="descending"),
+                axis=alt.Axis(labelLimit=220),
+            ),
+            color=alt.condition(
+                "datum._value >= 0",
+                alt.value(POSITIVE_COLOR),
+                alt.value(NEGATIVE_COLOR),
+            ),
+            tooltip=tooltips,
+        )
+    )
+    zero_rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#475569", opacity=0.55).encode(x="x:Q")
+    chart = (
+        (bars + zero_rule)
+        .properties(title=title, height=_bar_height(len(chart_data)))
+        .configure_view(strokeWidth=0)
+        .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+    )
+    st.altair_chart(chart, width="stretch")
+
+
+def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
+    if data.empty:
+        st.info("暂无可展示的月份趋势数据。")
+        return
+
+    if comparison_mode == "年初以来":
+        finance_col = "finance_income_ytd"
+        comprehensive_col = "comprehensive_income_ytd"
+        finance_label = "年初以来财务收益"
+        comprehensive_label = "年初以来综合收益"
+    else:
+        finance_col = "finance_income_mtd"
+        comprehensive_col = "comprehensive_income_mtd"
+        finance_label = "本月财务收益"
+        comprehensive_label = "本月综合收益"
+
+    monthly = (
+        data.groupby("snapshot_month", dropna=False)
+        .agg(
+            full_market_value=("full_market_value", "sum"),
+            finance_income=(finance_col, "sum"),
+            comprehensive_income=(comprehensive_col, "sum"),
+        )
+        .reset_index()
+        .sort_values("snapshot_month")
+    )
+    if monthly.empty:
+        st.info("暂无可展示的月份趋势数据。")
+        return
+
+    month_order = monthly["snapshot_month"].astype(str).tolist()
+    market_chart = (
+        alt.Chart(monthly)
+        .mark_line(point=True, color=POSITIVE_COLOR, strokeWidth=3)
+        .encode(
+            x=alt.X("snapshot_month:N", title="月份", sort=month_order),
+            y=alt.Y("full_market_value:Q", title="全价市值(亿)", scale=alt.Scale(zero=False)),
+            tooltip=[
+                alt.Tooltip("snapshot_month:N", title="月份"),
+                alt.Tooltip("full_market_value:Q", title="全价市值(亿)", format=",.2f"),
+            ],
+        )
+        .properties(title="全组合市值趋势", height=260)
+        .configure_view(strokeWidth=0)
+        .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+    )
+
+    income_long = monthly.melt(
+        id_vars=["snapshot_month"],
+        value_vars=["finance_income", "comprehensive_income"],
+        var_name="income_type",
+        value_name="income_value",
+    )
+    income_long["income_type"] = income_long["income_type"].map(
+        {
+            "finance_income": finance_label,
+            "comprehensive_income": comprehensive_label,
+        }
+    )
+    income_chart = (
+        alt.Chart(income_long)
+        .mark_line(point=True, strokeWidth=3)
+        .encode(
+            x=alt.X("snapshot_month:N", title="月份", sort=month_order),
+            y=alt.Y("income_value:Q", title="收益(亿)"),
+            color=alt.Color(
+                "income_type:N",
+                title=None,
+                scale=alt.Scale(
+                    domain=[finance_label, comprehensive_label],
+                    range=[NEUTRAL_COLOR, POSITIVE_COLOR],
+                ),
+                legend=alt.Legend(orient="top"),
+            ),
+            tooltip=[
+                alt.Tooltip("snapshot_month:N", title="月份"),
+                alt.Tooltip("income_type:N", title="收益口径"),
+                alt.Tooltip("income_value:Q", title="收益(亿)", format=",.2f"),
+            ],
+        )
+        .properties(title=f"{comparison_mode}收益趋势", height=260)
+        .configure_view(strokeWidth=0)
+        .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+    )
+
+    trend_cols = st.columns(2)
+    trend_cols[0].altair_chart(market_chart, width="stretch")
+    trend_cols[1].altair_chart(income_chart, width="stretch")
+
+
+def render_heatmap(class_summary: pd.DataFrame, selected_account: str, comparison_mode: str) -> None:
+    metric = "comprehensive_income_mtd_current"
+    value_title = display_names_for_mode(comparison_mode)[metric]
+    if selected_account != ALL:
+        render_bar_chart(
+            class_summary,
+            metric,
+            "asset_class",
+            f"{selected_label(selected_account)}：投资品种综合收益贡献",
+            value_title,
+            limit=12,
+            selection="abs",
+            comparison_mode=comparison_mode,
+            empty_message="当前账户暂无可展示的投资品种收益贡献。",
+        )
+        return
+
+    if not _has_chart_values(class_summary, metric):
+        st.info("暂无可展示的账户 × 投资品种收益热力图。")
+        return
+
+    working = class_summary.copy()
+    working[metric] = _numeric_series(working, metric)
+    working = working[working[metric].abs() > CHART_EPSILON]
+    account_order = (
+        working.groupby("account_bucket")[metric]
+        .sum()
+        .abs()
+        .sort_values(ascending=False)
+        .head(10)
+        .index.astype(str)
+        .tolist()
+    )
+    class_order = (
+        working.groupby("asset_class")[metric]
+        .sum()
+        .abs()
+        .sort_values(ascending=False)
+        .head(12)
+        .index.astype(str)
+        .tolist()
+    )
+    chart_data = working[
+        working["account_bucket"].astype(str).isin(account_order)
+        & working["asset_class"].astype(str).isin(class_order)
+    ].copy()
+    chart_data["account_bucket"] = chart_data["account_bucket"].astype(str)
+    chart_data["asset_class"] = chart_data["asset_class"].astype(str)
+    chart_data["full_market_value_current"] = pd.to_numeric(
+        chart_data["full_market_value_current"],
+        errors="coerce",
+    )
+    chart_data["comprehensive_return_mtd"] = pd.to_numeric(
+        chart_data["comprehensive_return_mtd"],
+        errors="coerce",
+    )
+
+    chart = (
+        alt.Chart(chart_data)
+        .mark_rect()
+        .encode(
+            x=alt.X(
+                "account_bucket:N",
+                title="账户",
+                sort=account_order,
+                axis=alt.Axis(labelAngle=-35, labelLimit=120),
+            ),
+            y=alt.Y(
+                "asset_class:N",
+                title="投资品种",
+                sort=class_order,
+                axis=alt.Axis(labelLimit=150),
+            ),
+            color=alt.Color(
+                f"{metric}:Q",
+                title=value_title,
+                scale=alt.Scale(domainMid=0, range=[NEGATIVE_COLOR, "#F2F1ED", POSITIVE_COLOR]),
+            ),
+            tooltip=[
+                alt.Tooltip("account_bucket:N", title="账户"),
+                alt.Tooltip("asset_class:N", title="投资品种"),
+                alt.Tooltip(f"{metric}:Q", title=value_title, format=",.2f"),
+                alt.Tooltip("full_market_value_current:Q", title="当前全价市值(亿)", format=",.2f"),
+                alt.Tooltip("comprehensive_return_mtd:Q", title="综合收益率", format=".2%"),
+            ],
+        )
+        .properties(
+            title="账户 × 投资品种综合收益热力图",
+            height=max(260, min(520, len(class_order) * 30 + 70)),
+        )
+        .configure_view(strokeWidth=0)
+        .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+    )
+    st.altair_chart(chart, width="stretch")
+
+
 def main() -> None:
     apply_yacht_theme()
     require_login()
@@ -519,6 +825,10 @@ def main() -> None:
     top_cols[4].metric("快照行数", f"{len(current_slice):,}")
     st.write(auto_summary(current_mv, prior_mv, current_fin, current_comp, quality, comparison_mode))
 
+    st.subheader("图表总览")
+    show_block_note(f"趋势图按全组合逐月汇总；收益曲线采用{period_label}口径，市值曲线始终展示各月全价市值。")
+    render_monthly_trends(data, comparison_mode)
+
     st.divider()
 
     st.subheader("投资品种总览：规模变化与收益贡献")
@@ -527,6 +837,27 @@ def main() -> None:
     )
     asset_class_summary = comparison_summary(data, current_month, prior_month, ["asset_class"], comparison_mode)
     asset_class_display = asset_class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
+    asset_chart_cols = st.columns(2)
+    with asset_chart_cols[0]:
+        render_bar_chart(
+            asset_class_summary,
+            "comprehensive_income_mtd_current",
+            "asset_class",
+            "投资品种综合收益贡献 Top/Bottom",
+            display_names_for_mode(comparison_mode)["comprehensive_income_mtd_current"],
+            comparison_mode=comparison_mode,
+            empty_message="当前投资品种暂无可展示的收益贡献。",
+        )
+    with asset_chart_cols[1]:
+        render_bar_chart(
+            asset_class_summary,
+            "full_market_value_delta",
+            "asset_class",
+            "投资品种规模变化 Top/Bottom",
+            display_names_for_mode(comparison_mode)["full_market_value_delta"],
+            comparison_mode=comparison_mode,
+            empty_message="当前投资品种暂无可展示的规模变化。",
+        )
     st.dataframe(
         format_table(
             asset_class_display[
@@ -554,6 +885,17 @@ def main() -> None:
         f"本表用于回答哪个账户规模增加或减少、哪个账户贡献收益；收益率 = {period_label}收益 / {capital_label}，资金占用无效时显示为“—”。"
     )
     account_display = account_summary.sort_values("full_market_value_delta", ascending=False)
+    render_bar_chart(
+        account_summary,
+        "comprehensive_income_mtd_current",
+        "account_bucket",
+        "账户综合收益贡献排行",
+        display_names_for_mode(comparison_mode)["comprehensive_income_mtd_current"],
+        limit=12,
+        selection="abs",
+        comparison_mode=comparison_mode,
+        empty_message="当前账户暂无可展示的收益贡献。",
+    )
     st.dataframe(
         format_table(
             account_display[
@@ -610,6 +952,7 @@ def main() -> None:
     if selected_account != ALL:
         class_summary = class_summary[class_summary["account_bucket"] == selected_account]
     class_display = class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
+    render_heatmap(class_summary, selected_account, comparison_mode)
     st.dataframe(
         format_table(
             class_display[
