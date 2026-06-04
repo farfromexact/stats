@@ -767,23 +767,40 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
     chart_data["_color_note"] = np.where(
         chart_data["_is_funding_asset_class"],
         "回购/融资科目：使用中性颜色",
-        "按指标正负染色",
+        "按排名强度染色，真实值见 tooltip",
     )
     chart_data["full_market_value_current"] = pd.to_numeric(
         chart_data["full_market_value_current"],
         errors="coerce",
     )
+    chart_data["_amount_value"] = pd.to_numeric(chart_data[metric], errors="coerce")
+    chart_data["_return_value"] = pd.to_numeric(chart_data[return_metric], errors="coerce")
+
+    def absolute_rank_percentile(value_col: str) -> pd.Series:
+        values = pd.to_numeric(chart_data[value_col], errors="coerce")
+        valid = (
+            ~chart_data["_is_funding_asset_class"]
+            & values.notna()
+            & (values.abs() > CHART_EPSILON)
+        )
+        ranks = pd.Series(np.nan, index=chart_data.index, dtype=float)
+        ranks.loc[valid] = values.loc[valid].abs().rank(method="average", pct=True)
+        return ranks
+
+    amount_rank = absolute_rank_percentile("_amount_value")
+    return_rank = absolute_rank_percentile("_return_value")
+    amount_sign = np.sign(chart_data["_amount_value"].fillna(0.0))
+    return_sign = np.sign(chart_data["_return_value"].fillna(0.0))
+    amount_weight = np.sqrt(amount_rank.fillna(0.0))
+    chart_data["_amount_rank_score"] = amount_sign * amount_rank
+    chart_data["_return_weighted_score"] = return_sign * return_rank * amount_weight
 
     heatmap_height = max(300, min(620, len(class_order) * 34 + 80))
 
-    def heatmap_chart(value_col: str, color_col: str, title: str, legend_title: str):
-        chart_data[color_col] = chart_data[value_col].where(
-            ~chart_data["_is_funding_asset_class"],
-            np.nan,
-        )
+    def heatmap_chart(score_col: str, title: str, legend_title: str):
         return (
             alt.Chart(chart_data)
-            .mark_rect()
+            .mark_rect(stroke="#E5E1D8", strokeWidth=0.55)
             .encode(
                 x=alt.X(
                     "account_bucket:N",
@@ -801,9 +818,9 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
                     "datum._is_funding_asset_class",
                     alt.value(FUNDING_COLOR),
                     alt.Color(
-                        f"{color_col}:Q",
+                        f"{score_col}:Q",
                         title=legend_title,
-                        scale=alt.Scale(domainMid=0, range=[NEGATIVE_COLOR, "#F2F1ED", POSITIVE_COLOR]),
+                        scale=alt.Scale(domain=[-1, 0, 1], range=[NEGATIVE_COLOR, "#F2F1ED", POSITIVE_COLOR]),
                     ),
                 ),
                 tooltip=[
@@ -811,6 +828,8 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
                     alt.Tooltip("asset_class:N", title="投资品种"),
                     alt.Tooltip(f"{metric}:Q", title=value_title, format=",.2f"),
                     alt.Tooltip(f"{return_metric}:Q", title=return_title, format=".2%"),
+                    alt.Tooltip("_amount_rank_score:Q", title="金额排名强度", format=".2f"),
+                    alt.Tooltip("_return_weighted_score:Q", title="收益率加权排名强度", format=".2f"),
                     alt.Tooltip("_color_note:N", title="颜色口径"),
                     alt.Tooltip("full_market_value_current:Q", title="当前全价市值(亿)", format=",.2f"),
                 ],
@@ -821,20 +840,18 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
         )
 
     return_chart = heatmap_chart(
-        return_metric,
-        "_return_color_value",
+        "_return_weighted_score",
         "账户 × 投资品种综合收益率热力图",
-        return_title,
+        "收益率加权排名强度",
     )
     amount_chart = heatmap_chart(
-        metric,
-        "_amount_color_value",
+        "_amount_rank_score",
         "账户 × 投资品种综合收益金额热力图",
-        value_title,
+        "金额贡献排名强度",
     )
     st.altair_chart(return_chart, width="stretch")
     st.altair_chart(amount_chart, width="stretch")
-    st.caption("颜色说明：两张热力图共用账户和投资品种排序；正回购、逆回购按回购/融资科目处理，使用中性灰蓝色。")
+    st.caption("颜色说明：两张热力图共用账户和投资品种排序；颜色按排名强度展示，精确值以 tooltip 和下方表格为准；正回购、逆回购按回购/融资科目处理，使用中性灰蓝色。")
 
 
 def main() -> None:
