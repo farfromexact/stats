@@ -763,90 +763,78 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
     chart_data["account_bucket"] = chart_data["account_bucket"].astype(str)
     chart_data["asset_class"] = chart_data["asset_class"].astype(str)
     chart_data["_is_funding_asset_class"] = chart_data["asset_class"].map(is_funding_asset_class)
-    chart_data["_amount_color_value"] = chart_data[metric].where(
-        ~chart_data["_is_funding_asset_class"],
-        np.nan,
-    )
     chart_data[return_metric] = pd.to_numeric(chart_data[return_metric], errors="coerce")
-    chart_data["_return_color_value"] = chart_data[return_metric].where(
-        ~chart_data["_is_funding_asset_class"],
-        np.nan,
-    )
     chart_data["_color_note"] = np.where(
         chart_data["_is_funding_asset_class"],
-        "回购/融资科目：两层均使用中性颜色",
-        "上半格=综合收益率；下半格=综合收益金额",
+        "回购/融资科目：使用中性颜色",
+        "按指标正负染色",
     )
     chart_data["full_market_value_current"] = pd.to_numeric(
         chart_data["full_market_value_current"],
         errors="coerce",
     )
 
-    base = alt.Chart(chart_data).encode(
-        x=alt.X(
-            "account_bucket:N",
-            title="账户",
-            sort=account_order,
-            axis=alt.Axis(labelAngle=-35, labelLimit=120),
-        ),
-        y=alt.Y(
-            "asset_class:N",
-            title="投资品种",
-            sort=class_order,
-            axis=alt.Axis(labelLimit=150),
-        ),
-    )
-    tooltip = [
-        alt.Tooltip("account_bucket:N", title="账户"),
-        alt.Tooltip("asset_class:N", title="投资品种"),
-        alt.Tooltip(f"{metric}:Q", title=value_title, format=",.2f"),
-        alt.Tooltip(f"{return_metric}:Q", title=return_title, format=".2%"),
-        alt.Tooltip("_color_note:N", title="颜色口径"),
-        alt.Tooltip("full_market_value_current:Q", title="当前全价市值(亿)", format=",.2f"),
-    ]
-    return_layer = (
-        base.mark_rect(yOffset=-7, height=13)
-        .encode(
-            color=alt.condition(
-                "datum._is_funding_asset_class",
-                alt.value(FUNDING_COLOR),
-                alt.Color(
-                    "_return_color_value:Q",
-                    title=return_title,
-                    scale=alt.Scale(domainMid=0, range=[NEGATIVE_COLOR, "#F2F1ED", POSITIVE_COLOR]),
-                ),
-            ),
-            tooltip=tooltip,
-        )
-    )
-    amount_layer = (
-        base.mark_rect(yOffset=7, height=13)
-        .encode(
-            color=alt.condition(
-                "datum._is_funding_asset_class",
-                alt.value(FUNDING_COLOR),
-                alt.Color(
-                    "_amount_color_value:Q",
-                    title=value_title,
-                    scale=alt.Scale(domainMid=0, range=[NEGATIVE_COLOR, "#F2F1ED", POSITIVE_COLOR]),
-                ),
-            ),
-            tooltip=tooltip,
-        )
-    )
+    heatmap_height = max(300, min(620, len(class_order) * 34 + 80))
 
-    chart = (
-        alt.layer(return_layer, amount_layer)
-        .resolve_scale(color="independent")
-        .properties(
-            title="账户 × 投资品种双指标热力图",
-            height=max(300, min(620, len(class_order) * 34 + 80)),
+    def heatmap_chart(value_col: str, color_col: str, title: str, legend_title: str):
+        chart_data[color_col] = chart_data[value_col].where(
+            ~chart_data["_is_funding_asset_class"],
+            np.nan,
         )
-        .configure_view(strokeWidth=0)
-        .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+        return (
+            alt.Chart(chart_data)
+            .mark_rect()
+            .encode(
+                x=alt.X(
+                    "account_bucket:N",
+                    title="账户",
+                    sort=account_order,
+                    axis=alt.Axis(labelAngle=-35, labelLimit=120),
+                ),
+                y=alt.Y(
+                    "asset_class:N",
+                    title="投资品种",
+                    sort=class_order,
+                    axis=alt.Axis(labelLimit=150),
+                ),
+                color=alt.condition(
+                    "datum._is_funding_asset_class",
+                    alt.value(FUNDING_COLOR),
+                    alt.Color(
+                        f"{color_col}:Q",
+                        title=legend_title,
+                        scale=alt.Scale(domainMid=0, range=[NEGATIVE_COLOR, "#F2F1ED", POSITIVE_COLOR]),
+                    ),
+                ),
+                tooltip=[
+                    alt.Tooltip("account_bucket:N", title="账户"),
+                    alt.Tooltip("asset_class:N", title="投资品种"),
+                    alt.Tooltip(f"{metric}:Q", title=value_title, format=",.2f"),
+                    alt.Tooltip(f"{return_metric}:Q", title=return_title, format=".2%"),
+                    alt.Tooltip("_color_note:N", title="颜色口径"),
+                    alt.Tooltip("full_market_value_current:Q", title="当前全价市值(亿)", format=",.2f"),
+                ],
+            )
+            .properties(title=title, height=heatmap_height)
+            .configure_view(strokeWidth=0)
+            .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+        )
+
+    return_chart = heatmap_chart(
+        return_metric,
+        "_return_color_value",
+        "账户 × 投资品种综合收益率热力图",
+        return_title,
     )
-    st.altair_chart(chart, width="stretch")
-    st.caption("颜色说明：每个格子上半格表示综合收益率，下半格表示综合收益金额；正回购、逆回购按回购/融资科目处理，两层均使用中性灰蓝色。")
+    amount_chart = heatmap_chart(
+        metric,
+        "_amount_color_value",
+        "账户 × 投资品种综合收益金额热力图",
+        value_title,
+    )
+    st.altair_chart(return_chart, width="stretch")
+    st.altair_chart(amount_chart, width="stretch")
+    st.caption("颜色说明：两张热力图共用账户和投资品种排序；正回购、逆回购按回购/融资科目处理，使用中性灰蓝色。")
 
 
 def main() -> None:
