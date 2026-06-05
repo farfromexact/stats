@@ -64,12 +64,8 @@ def current_vs_prior(data: pd.DataFrame, current_month: str, prior_month: str, g
     merged["comprehensive_income_mtd_delta"] = (
         merged["comprehensive_income_mtd_current"] - merged["comprehensive_income_mtd_prior"]
     )
-    merged["finance_income_period"] = (
-        merged["finance_income_ytd_current"] - merged["finance_income_ytd_prior"]
-    )
-    merged["comprehensive_income_period"] = (
-        merged["comprehensive_income_ytd_current"] - merged["comprehensive_income_ytd_prior"]
-    )
+    merged["finance_income_period"] = merged["finance_income_mtd_current"]
+    merged["comprehensive_income_period"] = merged["comprehensive_income_mtd_current"]
     merged["net_full_market_value_delta"] = (
         merged["full_market_value_delta"] - merged["comprehensive_income_period"]
     )
