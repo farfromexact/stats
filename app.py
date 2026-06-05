@@ -310,19 +310,6 @@ def apply_yacht_theme() -> None:
             opacity: 0.9;
         }
 
-        .inline-nav-link {
-            display: inline-block;
-            margin: 0.35rem 0 0.8rem 0;
-            color: var(--yacht-navy) !important;
-            font-weight: 600;
-            text-decoration: none;
-        }
-
-        .inline-nav-link:hover {
-            color: var(--yacht-ink) !important;
-            text-decoration: underline;
-        }
-
         div[data-testid="stDataFrame"] {
             border: 1px solid var(--yacht-deck);
             border-radius: 8px;
@@ -448,6 +435,13 @@ AMOUNT_COLUMNS = {
     "avg_capital_mtd_current",
 }
 PCT_COLUMNS = {"finance_return_mtd", "comprehensive_return_mtd"}
+COUNT_COLUMNS = {
+    "record_count",
+    "record_count_current",
+    "source_rows",
+    "source_rows_current",
+    "source_rows_prior",
+}
 
 
 @st.cache_data(show_spinner="正在读取月度宽表...")
@@ -514,6 +508,7 @@ def display_names_for_mode(comparison_mode: str) -> dict[str, str]:
 
 def clean_for_display(frame: pd.DataFrame, comparison_mode: str = "较所选月份") -> pd.DataFrame:
     display = frame.replace([np.inf, -np.inf], np.nan).copy()
+    display = display.where(pd.notna(display), np.nan)
     return display.rename(columns=display_names_for_mode(comparison_mode))
 
 
@@ -529,6 +524,8 @@ def format_table(frame: pd.DataFrame, precision: str = "display", comparison_mod
             formatters[display_col] = f"{{:,.{amount_decimals}f}}"
         elif source_col in PCT_COLUMNS:
             formatters[display_col] = "{:.2%}"
+        elif source_col in COUNT_COLUMNS:
+            formatters[display_col] = "{:,.0f}"
     return display.style.format(formatters, na_rep="—")
 
 
@@ -713,13 +710,6 @@ def income_chart_config(comparison_mode: str, title_prefix: str, title_suffix: s
 
 def section_anchor(anchor_id: str) -> None:
     st.markdown(f'<span id="{anchor_id}"></span>', unsafe_allow_html=True)
-
-
-def back_to_charts_link() -> None:
-    st.markdown(
-        '<a class="inline-nav-link" href="#charts-overview">返回图表总览</a>',
-        unsafe_allow_html=True,
-    )
 
 
 def sidebar_nav() -> None:
@@ -1103,8 +1093,8 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
             x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
             y=alt.Y(
                 "repo_financing:Q",
-                title="正回购融资(亿)",
-                axis=alt.Axis(orient="right", format=",.0f"),
+                title=None,
+                axis=alt.Axis(labels=False, ticks=False, domain=False, title=None),
                 scale=alt.Scale(zero=False),
             ),
             tooltip=scale_tooltip,
@@ -1117,7 +1107,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
             x=alt.X("snapshot_month:N", sort=month_order),
             y=alt.Y(
                 "repo_financing:Q",
-                axis=alt.Axis(orient="right", format=",.0f"),
+                axis=None,
                 scale=alt.Scale(zero=False),
             ),
             text=alt.Text("repo_financing:Q", format=",.0f"),
@@ -1126,7 +1116,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     scale_chart = (
         alt.layer(scale_bars, scale_labels, repo_line, repo_labels)
         .resolve_scale(y="independent")
-        .properties(title="规模与正回购融资", height=300)
+        .properties(title="规模与正回购融资余额", height=300)
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
@@ -1416,36 +1406,35 @@ def main() -> None:
         else:
             prior_month = default_prior
             st.caption("年初以来口径使用源表年初市值、本年以来收益、本年以来平均资金占用；对比月份不参与主表计算。")
+        if st.button("重置局部筛选"):
+            st.session_state["reset_filters"] = True
+            st.rerun()
 
     account_summary = ensure_summary_columns(
         comparison_summary(data, current_month, prior_month, ["account_bucket"], comparison_mode),
         comparison_mode,
     )
     account_options = [ALL] + sorted(account_summary["account_bucket"].astype(str).tolist())
+    if st.session_state.get("账户") not in account_options:
+        st.session_state["账户"] = ALL
+    selected_account = st.session_state.get("账户", ALL)
 
-    with st.sidebar:
-        selected_account = st.selectbox("账户", account_options, key="账户")
-
-    filtered_for_options = data[data["snapshot_month"] == current_month]
+    current_options_slice = data[data["snapshot_month"] == current_month]
+    account_filtered_options = current_options_slice
     if selected_account != ALL:
-        filtered_for_options = filtered_for_options[filtered_for_options["account_bucket"] == selected_account]
-    asset_options = [ALL] + sorted(filtered_for_options["asset_class"].dropna().astype(str).unique().tolist())
+        account_filtered_options = account_filtered_options[account_filtered_options["account_bucket"] == selected_account]
+    asset_options = [ALL] + sorted(account_filtered_options["asset_class"].dropna().astype(str).unique().tolist())
     if st.session_state.get("投资品种") not in asset_options:
         st.session_state["投资品种"] = ALL
-    with st.sidebar:
-        selected_asset_class = st.selectbox("投资品种", asset_options, key="投资品种")
+    selected_asset_class = st.session_state.get("投资品种", ALL)
 
-    manager_options_frame = filtered_for_options
+    manager_options_frame = account_filtered_options
     if selected_asset_class != ALL:
         manager_options_frame = manager_options_frame[manager_options_frame["asset_class"] == selected_asset_class]
     manager_options = [ALL] + sorted(manager_options_frame["manager"].dropna().astype(str).unique().tolist())
     if st.session_state.get("投资经理") not in manager_options:
         st.session_state["投资经理"] = ALL
-    with st.sidebar:
-        selected_manager = st.selectbox("投资经理", manager_options, key="投资经理")
-        if st.button("重置筛选"):
-            st.session_state["reset_filters"] = True
-            st.rerun()
+    selected_manager = st.session_state.get("投资经理", ALL)
 
     render_filter_pills(
         current_month,
@@ -1578,7 +1567,6 @@ def main() -> None:
         width="stretch",
         hide_index=True,
     )
-    back_to_charts_link()
 
     section_anchor("account-overview")
     st.subheader("账户层：规模变化与收益贡献")
@@ -1618,7 +1606,6 @@ def main() -> None:
         width="stretch",
         hide_index=True,
     )
-    back_to_charts_link()
 
     section_anchor("mandate-overview")
     st.subheader("委受托维度：规模变化与收益贡献")
@@ -1651,11 +1638,13 @@ def main() -> None:
         width="stretch",
         hide_index=True,
     )
-    back_to_charts_link()
 
     section_anchor("account-class-breakdown")
     st.subheader("账户内品种拆解")
     show_block_note(f"本表用于回答选定账户的钱投向哪些品种，以及这些品种在{comparison_mode}口径下分别贡献或拖累了多少收益。")
+    account_control_col, _ = st.columns([0.28, 0.72])
+    with account_control_col:
+        selected_account = st.selectbox("账户", account_options, key="账户")
     class_summary = ensure_summary_columns(
         comparison_summary(data, current_month, prior_month, ["account_bucket", "asset_class"], comparison_mode),
         comparison_mode,
@@ -1685,11 +1674,34 @@ def main() -> None:
         width="stretch",
         hide_index=True,
     )
-    back_to_charts_link()
 
     section_anchor("manager-breakdown")
     st.subheader("品种内经理拆解")
     show_block_note(f"本表用于回答选定账户和品种下，结果由哪些投资经理贡献或拖累；当前采用{comparison_mode}口径。")
+    account_filtered_options = current_options_slice
+    if selected_account != ALL:
+        account_filtered_options = account_filtered_options[account_filtered_options["account_bucket"] == selected_account]
+    asset_options = [ALL] + sorted(account_filtered_options["asset_class"].dropna().astype(str).unique().tolist())
+    if st.session_state.get("投资品种") not in asset_options:
+        st.session_state["投资品种"] = ALL
+    selected_asset_class = st.session_state.get("投资品种", ALL)
+    manager_options_frame = account_filtered_options
+    if selected_asset_class != ALL:
+        manager_options_frame = manager_options_frame[manager_options_frame["asset_class"] == selected_asset_class]
+    manager_options = [ALL] + sorted(manager_options_frame["manager"].dropna().astype(str).unique().tolist())
+    if st.session_state.get("投资经理") not in manager_options:
+        st.session_state["投资经理"] = ALL
+    manager_control_cols = st.columns([0.28, 0.28, 0.44])
+    with manager_control_cols[0]:
+        selected_asset_class = st.selectbox("投资品种", asset_options, key="投资品种")
+    manager_options_frame = account_filtered_options
+    if selected_asset_class != ALL:
+        manager_options_frame = manager_options_frame[manager_options_frame["asset_class"] == selected_asset_class]
+    manager_options = [ALL] + sorted(manager_options_frame["manager"].dropna().astype(str).unique().tolist())
+    if st.session_state.get("投资经理") not in manager_options:
+        st.session_state["投资经理"] = ALL
+    with manager_control_cols[1]:
+        selected_manager = st.selectbox("投资经理", manager_options, key="投资经理")
     manager_summary = ensure_summary_columns(
         comparison_summary(
             data,
@@ -1727,7 +1739,6 @@ def main() -> None:
         width="stretch",
         hide_index=True,
     )
-    back_to_charts_link()
 
     section_anchor("asset-evidence")
     st.subheader("资产证据")
@@ -1810,7 +1821,6 @@ def main() -> None:
         width="stretch",
         hide_index=True,
     )
-    back_to_charts_link()
 
     st.divider()
 
