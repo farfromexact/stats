@@ -803,6 +803,45 @@ def top_by_abs(frame: pd.DataFrame, metric: str, limit: int) -> pd.DataFrame:
     return working.sort_values("_abs_metric", ascending=False).head(limit)
 
 
+def shared_top_bottom_labels(
+    frame: pd.DataFrame,
+    primary_metric: str,
+    secondary_metric: str,
+    label_col: str,
+    limit: int = 8,
+    max_labels: int = 16,
+) -> list[str]:
+    if frame.empty or label_col not in frame:
+        return []
+
+    labels: list[str] = []
+
+    def append_label(value: object) -> None:
+        label = str(value)
+        if label not in labels:
+            labels.append(label)
+
+    if primary_metric in frame:
+        primary = top_bottom(frame, primary_metric, label_col, limit)
+        for label in primary[label_col].tolist():
+            append_label(label)
+
+    if len(labels) >= max_labels or secondary_metric not in frame:
+        return labels[:max_labels]
+
+    secondary = top_bottom(frame, secondary_metric, label_col, limit).copy()
+    if secondary.empty:
+        return labels[:max_labels]
+
+    secondary["_secondary_abs"] = _numeric_series(secondary, secondary_metric).abs()
+    for label in secondary.sort_values("_secondary_abs", ascending=False)[label_col].tolist():
+        append_label(label)
+        if len(labels) >= max_labels:
+            break
+
+    return labels[:max_labels]
+
+
 def _bar_height(row_count: int) -> int:
     return max(240, min(720, row_count * 36 + 120))
 
@@ -817,8 +856,17 @@ def render_bar_chart(
     selection: str = "top_bottom",
     comparison_mode: str = "较所选月份",
     empty_message: str = "暂无可展示的图表数据。",
+    label_order: list[str] | None = None,
 ) -> None:
-    if selection == "abs":
+    normalized_label_order = [str(label) for label in label_order or []]
+    if normalized_label_order:
+        chart_data = frame.copy()
+        chart_data["_label_for_selection"] = chart_data[label_col].astype(str)
+        chart_data = chart_data[chart_data["_label_for_selection"].isin(normalized_label_order)]
+        order_map = {label: index for index, label in enumerate(normalized_label_order)}
+        chart_data["_forced_order"] = chart_data["_label_for_selection"].map(order_map)
+        chart_data = chart_data.sort_values("_forced_order")
+    elif selection == "abs":
         chart_data = top_by_abs(frame, metric, limit)
     else:
         chart_data = top_bottom(frame, metric, label_col, limit)
@@ -849,8 +897,11 @@ def render_bar_chart(
         ],
         default="负向",
     )
-    chart_data = chart_data[chart_data["_value"].abs() > CHART_EPSILON]
-    chart_data = chart_data.sort_values("_value", ascending=False)
+    if normalized_label_order:
+        chart_data = chart_data.sort_values("_forced_order")
+    else:
+        chart_data = chart_data[chart_data["_value"].abs() > CHART_EPSILON]
+        chart_data = chart_data.sort_values("_value", ascending=False)
 
     tooltips = [
         alt.Tooltip("_label:N", title=display_names_for_mode(comparison_mode).get(label_col, label_col)),
@@ -885,7 +936,7 @@ def render_bar_chart(
             y=alt.Y(
                 "_label:N",
                 title=None,
-                sort=alt.SortField(field="_value", order="descending"),
+                sort=normalized_label_order or alt.SortField(field="_value", order="descending"),
                 axis=alt.Axis(labelLimit=220),
             ),
             color=alt.Color(
@@ -1339,6 +1390,12 @@ def main() -> None:
         "投资品种",
         " Top/Bottom",
     )
+    asset_chart_labels = shared_top_bottom_labels(
+        asset_class_summary,
+        asset_income_metric,
+        "full_market_value_delta",
+        "asset_class",
+    )
     asset_chart_cols = st.columns(2)
     with asset_chart_cols[0]:
         render_bar_chart(
@@ -1349,6 +1406,7 @@ def main() -> None:
             asset_income_value_title,
             comparison_mode=comparison_mode,
             empty_message="当前投资品种暂无可展示的收益贡献。",
+            label_order=asset_chart_labels,
         )
     with asset_chart_cols[1]:
         render_bar_chart(
@@ -1359,6 +1417,7 @@ def main() -> None:
             display_names_for_mode(comparison_mode)["full_market_value_delta"],
             comparison_mode=comparison_mode,
             empty_message="当前投资品种暂无可展示的规模变化。",
+            label_order=asset_chart_labels,
         )
     st.dataframe(
         format_table(
