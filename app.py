@@ -470,6 +470,39 @@ def ensure_runtime_columns(data: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]
     return data, missing
 
 
+def ensure_summary_columns(summary: pd.DataFrame, comparison_mode: str) -> pd.DataFrame:
+    summary = summary.copy()
+
+    def numeric_column(column: str, default: float = 0.0) -> pd.Series:
+        if column not in summary.columns:
+            return pd.Series(default, index=summary.index, dtype=float)
+        return pd.to_numeric(summary[column], errors="coerce").fillna(default)
+
+    if "finance_income_period" not in summary.columns:
+        if comparison_mode == "年初以来":
+            summary["finance_income_period"] = numeric_column("finance_income_ytd_current")
+        else:
+            summary["finance_income_period"] = (
+                numeric_column("finance_income_ytd_current") - numeric_column("finance_income_ytd_prior")
+            )
+
+    if "comprehensive_income_period" not in summary.columns:
+        if comparison_mode == "年初以来":
+            summary["comprehensive_income_period"] = numeric_column("comprehensive_income_ytd_current")
+        else:
+            summary["comprehensive_income_period"] = (
+                numeric_column("comprehensive_income_ytd_current")
+                - numeric_column("comprehensive_income_ytd_prior")
+            )
+
+    if "net_full_market_value_delta" not in summary.columns:
+        summary["net_full_market_value_delta"] = (
+            numeric_column("full_market_value_delta") - numeric_column("comprehensive_income_period")
+        )
+
+    return summary
+
+
 def display_names_for_mode(comparison_mode: str) -> dict[str, str]:
     names = DISPLAY_NAMES.copy()
     if comparison_mode == "年初以来":
@@ -1304,7 +1337,10 @@ def main() -> None:
             prior_month = default_prior
             st.caption("年初以来口径使用源表年初市值、本年以来收益、本年以来平均资金占用；对比月份不参与主表计算。")
 
-    account_summary = comparison_summary(data, current_month, prior_month, ["account_bucket"], comparison_mode)
+    account_summary = ensure_summary_columns(
+        comparison_summary(data, current_month, prior_month, ["account_bucket"], comparison_mode),
+        comparison_mode,
+    )
     account_options = [ALL] + sorted(account_summary["account_bucket"].astype(str).tolist())
 
     with st.sidebar:
@@ -1360,7 +1396,10 @@ def main() -> None:
         baseline_label = "对比月份"
         capital_label = "平均资金占用"
     quality = quality_metrics(data, current_month, comparison_mode)
-    asset_class_summary = comparison_summary(data, current_month, prior_month, ["asset_class"], comparison_mode)
+    asset_class_summary = ensure_summary_columns(
+        comparison_summary(data, current_month, prior_month, ["asset_class"], comparison_mode),
+        comparison_mode,
+    )
 
     section_anchor("overview")
     st.subheader("本月总体表现")
@@ -1506,7 +1545,10 @@ def main() -> None:
     show_block_note(
         f"本表用于回答不同委受托关系下的规模、收益贡献和变化情况；当前采用{comparison_mode}口径，不参与左侧筛选链路。"
     )
-    mandate_summary = comparison_summary(data, current_month, prior_month, ["mandate_type"], comparison_mode)
+    mandate_summary = ensure_summary_columns(
+        comparison_summary(data, current_month, prior_month, ["mandate_type"], comparison_mode),
+        comparison_mode,
+    )
     mandate_display = mandate_summary.sort_values("full_market_value_delta", ascending=False)
     st.dataframe(
         format_table(
@@ -1534,7 +1576,10 @@ def main() -> None:
     section_anchor("account-class-breakdown")
     st.subheader("账户内品种拆解")
     show_block_note(f"本表用于回答选定账户的钱投向哪些品种，以及这些品种在{comparison_mode}口径下分别贡献或拖累了多少收益。")
-    class_summary = comparison_summary(data, current_month, prior_month, ["account_bucket", "asset_class"], comparison_mode)
+    class_summary = ensure_summary_columns(
+        comparison_summary(data, current_month, prior_month, ["account_bucket", "asset_class"], comparison_mode),
+        comparison_mode,
+    )
     if selected_account != ALL:
         class_summary = class_summary[class_summary["account_bucket"] == selected_account]
     class_display = class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
@@ -1565,7 +1610,16 @@ def main() -> None:
     section_anchor("manager-breakdown")
     st.subheader("品种内经理拆解")
     show_block_note(f"本表用于回答选定账户和品种下，结果由哪些投资经理贡献或拖累；当前采用{comparison_mode}口径。")
-    manager_summary = comparison_summary(data, current_month, prior_month, ["account_bucket", "asset_class", "manager"], comparison_mode)
+    manager_summary = ensure_summary_columns(
+        comparison_summary(
+            data,
+            current_month,
+            prior_month,
+            ["account_bucket", "asset_class", "manager"],
+            comparison_mode,
+        ),
+        comparison_mode,
+    )
     if selected_account != ALL:
         manager_summary = manager_summary[manager_summary["account_bucket"] == selected_account]
     if selected_asset_class != ALL:
