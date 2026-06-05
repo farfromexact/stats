@@ -400,10 +400,13 @@ DISPLAY_NAMES = {
     "full_market_value_current": "当前全价市值(亿)",
     "full_market_value_prior": "对比全价市值(亿)",
     "full_market_value_delta": "全价市值变化(亿)",
+    "net_full_market_value_delta": "扣收益后规模变化(亿)",
     "finance_income_mtd_current": "当前本月财务收益(亿)",
     "comprehensive_income_mtd_current": "当前本月综合收益(亿)",
     "finance_income_mtd_delta": "财务收益变化(亿)",
     "comprehensive_income_mtd_delta": "综合收益变化(亿)",
+    "finance_income_period": "期间财务收益(亿)",
+    "comprehensive_income_period": "期间综合收益(亿)",
     "avg_capital_mtd_current": "当前平均资金占用(亿)",
     "finance_return_mtd": "本月财务收益率",
     "comprehensive_return_mtd": "本月综合收益率",
@@ -415,8 +418,11 @@ DISPLAY_NAMES = {
 YTD_DISPLAY_OVERRIDES = {
     "full_market_value_prior": "年初市值(亿)",
     "full_market_value_delta": "较年初变化(亿)",
+    "net_full_market_value_delta": "扣收益后较年初规模变化(亿)",
     "finance_income_mtd_current": "年初以来财务收益(亿)",
     "comprehensive_income_mtd_current": "年初以来综合收益(亿)",
+    "finance_income_period": "年初以来财务收益(亿)",
+    "comprehensive_income_period": "年初以来综合收益(亿)",
     "avg_capital_mtd_current": "本年以来平均资金占用(亿)",
     "finance_return_mtd": "年初以来财务收益率",
     "comprehensive_return_mtd": "年初以来综合收益率",
@@ -430,10 +436,13 @@ AMOUNT_COLUMNS = {
     "full_market_value_current",
     "full_market_value_prior",
     "full_market_value_delta",
+    "net_full_market_value_delta",
     "finance_income_mtd_current",
     "comprehensive_income_mtd_current",
     "finance_income_mtd_delta",
     "comprehensive_income_mtd_delta",
+    "finance_income_period",
+    "comprehensive_income_period",
     "avg_capital_mtd_current",
 }
 PCT_COLUMNS = {"finance_return_mtd", "comprehensive_return_mtd"}
@@ -905,7 +914,7 @@ def render_bar_chart(
 
     tooltips = [
         alt.Tooltip("_label:N", title=display_names_for_mode(comparison_mode).get(label_col, label_col)),
-        alt.Tooltip("_value:Q", title=value_title, format=",.2f"),
+        alt.Tooltip("_value:Q", title=value_title, format=".2%" if metric in PCT_COLUMNS else ",.2f"),
     ]
     if label_col == "asset_class":
         tooltips.append(alt.Tooltip("_color_note:N", title="颜色口径"))
@@ -914,8 +923,12 @@ def render_bar_chart(
         "comprehensive_income_mtd_current",
         "finance_income_mtd_delta",
         "comprehensive_income_mtd_delta",
+        "finance_income_period",
+        "comprehensive_income_period",
         "full_market_value_current",
         "full_market_value_delta",
+        "net_full_market_value_delta",
+        "avg_capital_mtd_current",
         "finance_return_mtd",
         "comprehensive_return_mtd",
     ]:
@@ -932,7 +945,11 @@ def render_bar_chart(
         alt.Chart(chart_data)
         .mark_bar(cornerRadiusEnd=2)
         .encode(
-            x=alt.X("_value:Q", title=value_title, axis=alt.Axis(format=",.1f")),
+            x=alt.X(
+                "_value:Q",
+                title=value_title,
+                axis=alt.Axis(format=".1%" if metric in PCT_COLUMNS else ",.1f"),
+            ),
             y=alt.Y(
                 "_label:N",
                 title=None,
@@ -1382,7 +1399,7 @@ def main() -> None:
     section_anchor("asset-class-overview")
     st.subheader("投资品种总览：规模变化与收益贡献")
     show_block_note(
-        f"本表不分账户，直接按投资品种汇总；较所选月份时收益图展示当前月相对对比月的综合收益变化，年初以来时展示年初以来综合收益。"
+        f"本表不分账户，直接按投资品种汇总；右侧净规模变化 = 全价市值变化 - 期间综合收益，用于近似识别真实增减仓或资金进出。"
     )
     asset_class_display = asset_class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
     asset_income_metric, asset_income_title, asset_income_value_title = income_chart_config(
@@ -1390,10 +1407,11 @@ def main() -> None:
         "投资品种",
         " Top/Bottom",
     )
+    asset_scale_metric = "net_full_market_value_delta"
     asset_chart_labels = shared_top_bottom_labels(
         asset_class_summary,
         asset_income_metric,
-        "full_market_value_delta",
+        asset_scale_metric,
         "asset_class",
     )
     asset_chart_cols = st.columns(2)
@@ -1411,10 +1429,10 @@ def main() -> None:
     with asset_chart_cols[1]:
         render_bar_chart(
             asset_class_summary,
-            "full_market_value_delta",
+            asset_scale_metric,
             "asset_class",
-            "投资品种规模变化 Top/Bottom",
-            display_names_for_mode(comparison_mode)["full_market_value_delta"],
+            "投资品种净规模变化 Top/Bottom",
+            display_names_for_mode(comparison_mode)[asset_scale_metric],
             comparison_mode=comparison_mode,
             empty_message="当前投资品种暂无可展示的规模变化。",
             label_order=asset_chart_labels,
@@ -1427,6 +1445,7 @@ def main() -> None:
                     "full_market_value_current",
                     "full_market_value_prior",
                     "full_market_value_delta",
+                    "net_full_market_value_delta",
                     "finance_income_mtd_current",
                     "comprehensive_income_mtd_current",
                     "avg_capital_mtd_current",
@@ -1445,24 +1464,19 @@ def main() -> None:
     section_anchor("account-overview")
     st.subheader("账户层：规模变化与收益贡献")
     show_block_note(
-        f"本表用于回答哪个账户规模增加或减少、哪个账户贡献收益；较所选月份时收益图展示当前月相对对比月的综合收益变化；收益率 = {period_label}收益 / {capital_label}。"
+        f"本表用于回答哪个账户收益效率更高；主图展示综合收益率，tooltip 保留收益额、规模变化和资金占用；收益率 = {period_label}收益 / {capital_label}。"
     )
     account_display = account_summary.sort_values("full_market_value_delta", ascending=False)
-    account_income_metric, account_income_title, account_income_value_title = income_chart_config(
-        comparison_mode,
-        "账户",
-        "排行",
-    )
     render_bar_chart(
         account_summary,
-        account_income_metric,
+        "comprehensive_return_mtd",
         "account_bucket",
-        account_income_title,
-        account_income_value_title,
+        "账户综合收益率排行",
+        display_names_for_mode(comparison_mode)["comprehensive_return_mtd"],
         limit=12,
         selection="abs",
         comparison_mode=comparison_mode,
-        empty_message="当前账户暂无可展示的收益贡献。",
+        empty_message="当前账户暂无可展示的综合收益率。",
     )
     st.dataframe(
         format_table(

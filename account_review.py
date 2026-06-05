@@ -64,6 +64,15 @@ def current_vs_prior(data: pd.DataFrame, current_month: str, prior_month: str, g
     merged["comprehensive_income_mtd_delta"] = (
         merged["comprehensive_income_mtd_current"] - merged["comprehensive_income_mtd_prior"]
     )
+    merged["finance_income_period"] = (
+        merged["finance_income_ytd_current"] - merged["finance_income_ytd_prior"]
+    )
+    merged["comprehensive_income_period"] = (
+        merged["comprehensive_income_ytd_current"] - merged["comprehensive_income_ytd_prior"]
+    )
+    merged["net_full_market_value_delta"] = (
+        merged["full_market_value_delta"] - merged["comprehensive_income_period"]
+    )
 
     valid_base = merged["avg_capital_mtd_current"] > 0.0001
     merged["finance_return_mtd"] = None
@@ -91,6 +100,11 @@ def current_vs_year_open(data: pd.DataFrame, current_month: str, group_cols: lis
     current["clean_market_value_delta"] = None
     current["finance_income_mtd_current"] = current["finance_income_ytd_current"]
     current["comprehensive_income_mtd_current"] = current["comprehensive_income_ytd_current"]
+    current["finance_income_period"] = current["finance_income_ytd_current"]
+    current["comprehensive_income_period"] = current["comprehensive_income_ytd_current"]
+    current["net_full_market_value_delta"] = (
+        current["full_market_value_delta"] - current["comprehensive_income_period"]
+    )
     current["avg_capital_mtd_current"] = current["avg_capital_ytd_current"]
 
     valid_base = current["avg_capital_ytd_current"] > 0.0001
