@@ -1082,7 +1082,11 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         .mark_text(dy=-8, color=POSITIVE_COLOR, fontWeight=600)
         .encode(
             x=alt.X("snapshot_month:N", sort=month_order),
-            y=alt.Y("full_market_value:Q", scale=alt.Scale(domain=[market_baseline, market_max + market_padding])),
+            y=alt.Y(
+                "full_market_value:Q",
+                axis=None,
+                scale=alt.Scale(domain=[market_baseline, market_max + market_padding]),
+            ),
             text=alt.Text("full_market_value:Q", format=",.0f"),
         )
     )
@@ -1137,16 +1141,22 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
             "comprehensive_income_mtd": mtd_label_comprehensive,
         }
     )
-    income_line_long = monthly.melt(
+    income_point_long = monthly.melt(
         id_vars=["snapshot_month"],
         value_vars=["finance_income_ytd", "comprehensive_income_ytd"],
         var_name="income_type",
         value_name="income_value",
     )
-    income_line_long["income_type"] = income_line_long["income_type"].map(
+    income_point_long["income_type"] = income_point_long["income_type"].map(
         {
             "finance_income_ytd": ytd_label_finance,
             "comprehensive_income_ytd": ytd_label_comprehensive,
+        }
+    )
+    income_point_long["offset_type"] = income_point_long["income_type"].map(
+        {
+            ytd_label_finance: mtd_label_finance,
+            ytd_label_comprehensive: mtd_label_comprehensive,
         }
     )
     income_domain = [
@@ -1155,7 +1165,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         ytd_label_finance,
         ytd_label_comprehensive,
     ]
-    income_colors = [NEUTRAL_COLOR, POSITIVE_COLOR, "#6F7F92", "#0B1A45"]
+    income_colors = [NEUTRAL_COLOR, POSITIVE_COLOR, "#C88439", "#0F6F3F"]
     income_tooltip = [
         alt.Tooltip("snapshot_month:N", title="月份"),
         alt.Tooltip("income_type:N", title="收益口径"),
@@ -1177,11 +1187,12 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
             tooltip=income_tooltip,
         )
     )
-    income_lines = (
-        alt.Chart(income_line_long)
-        .mark_line(point=alt.OverlayMarkDef(size=65), strokeWidth=2.5)
+    income_points = (
+        alt.Chart(income_point_long)
+        .mark_point(filled=True, size=100, stroke="white", strokeWidth=1.4)
         .encode(
             x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
+            xOffset=alt.XOffset("offset_type:N", sort=[mtd_label_finance, mtd_label_comprehensive]),
             y=alt.Y("income_value:Q", title="收益(亿)"),
             color=alt.Color(
                 "income_type:N",
@@ -1194,8 +1205,8 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     )
     zero_rule = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color="#475569", opacity=0.45).encode(y="y:Q")
     income_chart = (
-        (income_bars + income_lines + zero_rule)
-        .properties(title="收益趋势：当月30天 + 年初以来", height=300)
+        (income_bars + income_points + zero_rule)
+        .properties(title="收益趋势：当月30天 + 年初以来累计点", height=300)
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
@@ -1499,7 +1510,7 @@ def main() -> None:
 
     section_anchor("charts-overview")
     st.subheader("图表总览")
-    show_block_note("左图用柱展示全组合规模、用折线展示正回购融资余额；右图用柱展示当月30天收益、用折线展示年初以来累计收益。")
+    show_block_note("左图用柱展示全组合规模、用红色点线展示正回购融资余额；右图用柱展示当月30天收益，用彩色点展示对应口径的年初以来累计收益。")
     render_monthly_trends(data, comparison_mode)
 
     st.divider()
