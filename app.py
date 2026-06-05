@@ -26,7 +26,9 @@ POSITIVE_COLOR = "#122256"
 NEGATIVE_COLOR = "#8B2F2F"
 NEUTRAL_COLOR = "#8EA0B6"
 FUNDING_COLOR = "#6F7F92"
-FUNDING_ASSET_CLASSES = {"正回购", "逆回购"}
+REPO_FINANCING_ASSET_CLASSES = {"正回购"}
+REVERSE_REPO_ASSET_CLASSES = {"逆回购", "买入返售"}
+FUNDING_ASSET_CLASSES = REPO_FINANCING_ASSET_CLASSES | REVERSE_REPO_ASSET_CLASSES
 
 st.set_page_config(page_title="组合管理账户复盘", layout="wide")
 
@@ -1016,23 +1018,29 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         st.info("暂无可展示的月份趋势数据。")
         return
 
-    if comparison_mode == "年初以来":
-        finance_col = "finance_income_ytd"
-        comprehensive_col = "comprehensive_income_ytd"
-        finance_label = "年初以来财务收益"
-        comprehensive_label = "年初以来综合收益"
-    else:
-        finance_col = "finance_income_mtd"
-        comprehensive_col = "comprehensive_income_mtd"
-        finance_label = "本月财务收益"
-        comprehensive_label = "本月综合收益"
+    working = data.copy()
+    working["_asset_class"] = working["asset_class"].astype(str)
+    working["_repo_financing"] = np.where(
+        working["_asset_class"].isin(REPO_FINANCING_ASSET_CLASSES),
+        pd.to_numeric(working["full_market_value"], errors="coerce").fillna(0.0).abs(),
+        0.0,
+    )
+    working["_reverse_repo"] = np.where(
+        working["_asset_class"].isin(REVERSE_REPO_ASSET_CLASSES),
+        pd.to_numeric(working["full_market_value"], errors="coerce").fillna(0.0).abs(),
+        0.0,
+    )
 
     monthly = (
-        data.groupby("snapshot_month", dropna=False)
+        working.groupby("snapshot_month", dropna=False)
         .agg(
             full_market_value=("full_market_value", "sum"),
-            finance_income=(finance_col, "sum"),
-            comprehensive_income=(comprehensive_col, "sum"),
+            finance_income_mtd=("finance_income_mtd", "sum"),
+            comprehensive_income_mtd=("comprehensive_income_mtd", "sum"),
+            finance_income_ytd=("finance_income_ytd", "sum"),
+            comprehensive_income_ytd=("comprehensive_income_ytd", "sum"),
+            repo_financing=("_repo_financing", "sum"),
+            reverse_repo=("_reverse_repo", "sum"),
         )
         .reset_index()
         .sort_values("snapshot_month")
@@ -1041,6 +1049,10 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         st.info("暂无可展示的月份趋势数据。")
         return
 
+    monthly["net_repo_financing"] = monthly["repo_financing"] - monthly["reverse_repo"]
+    monthly["repo_financing_ratio"] = (
+        monthly["repo_financing"] / monthly["full_market_value"].replace(0.0, np.nan)
+    )
     month_order = monthly["snapshot_month"].astype(str).tolist()
     market_min = float(monthly["full_market_value"].min())
     market_max = float(monthly["full_market_value"].max())
@@ -1048,7 +1060,15 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     market_baseline = max(0.0, market_min - market_padding)
     monthly["market_baseline"] = market_baseline
 
-    market_bars = (
+    scale_tooltip = [
+        alt.Tooltip("snapshot_month:N", title="月份"),
+        alt.Tooltip("full_market_value:Q", title="全价市值(亿)", format=",.2f"),
+        alt.Tooltip("repo_financing:Q", title="正回购融资余额(亿)", format=",.2f"),
+        alt.Tooltip("repo_financing_ratio:Q", title="正回购融资/全价市值", format=".2%"),
+        alt.Tooltip("reverse_repo:Q", title="买入返售/逆回购余额(亿)", format=",.2f"),
+        alt.Tooltip("net_repo_financing:Q", title="净回购融资余额(亿)", format=",.2f"),
+    ]
+    scale_bars = (
         alt.Chart(monthly)
         .mark_bar(color=POSITIVE_COLOR, cornerRadiusTopLeft=4, cornerRadiusTopRight=4, width=44)
         .encode(
@@ -1064,13 +1084,10 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
                 scale=alt.Scale(domain=[market_baseline, market_max + market_padding]),
             ),
             y2="market_baseline:Q",
-            tooltip=[
-                alt.Tooltip("snapshot_month:N", title="月份"),
-                alt.Tooltip("full_market_value:Q", title="全价市值(亿)", format=",.2f"),
-            ],
+            tooltip=scale_tooltip,
         )
     )
-    market_labels = (
+    scale_labels = (
         alt.Chart(monthly)
         .mark_text(dy=-8, color=POSITIVE_COLOR, fontWeight=600)
         .encode(
@@ -1079,59 +1096,122 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
             text=alt.Text("full_market_value:Q", format=",.0f"),
         )
     )
-    market_chart = (
-        (market_bars + market_labels)
-        .properties(title="全组合市值", height=300)
+    repo_line = (
+        alt.Chart(monthly)
+        .mark_line(color=NEGATIVE_COLOR, point=alt.OverlayMarkDef(color=NEGATIVE_COLOR, size=70), strokeWidth=2.5)
+        .encode(
+            x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
+            y=alt.Y(
+                "repo_financing:Q",
+                title="正回购融资(亿)",
+                axis=alt.Axis(orient="right", format=",.0f"),
+                scale=alt.Scale(zero=False),
+            ),
+            tooltip=scale_tooltip,
+        )
+    )
+    repo_labels = (
+        alt.Chart(monthly)
+        .mark_text(dy=-12, color=NEGATIVE_COLOR, fontWeight=600)
+        .encode(
+            x=alt.X("snapshot_month:N", sort=month_order),
+            y=alt.Y(
+                "repo_financing:Q",
+                axis=alt.Axis(orient="right", format=",.0f"),
+                scale=alt.Scale(zero=False),
+            ),
+            text=alt.Text("repo_financing:Q", format=",.0f"),
+        )
+    )
+    scale_chart = (
+        alt.layer(scale_bars, scale_labels, repo_line, repo_labels)
+        .resolve_scale(y="independent")
+        .properties(title="规模与正回购融资", height=300)
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
 
-    income_long = monthly.melt(
+    mtd_label_finance = "当月财务收益"
+    mtd_label_comprehensive = "当月综合收益"
+    ytd_label_finance = "年初以来财务收益"
+    ytd_label_comprehensive = "年初以来综合收益"
+    income_bar_long = monthly.melt(
         id_vars=["snapshot_month"],
-        value_vars=["finance_income", "comprehensive_income"],
+        value_vars=["finance_income_mtd", "comprehensive_income_mtd"],
         var_name="income_type",
         value_name="income_value",
     )
-    income_long["income_type"] = income_long["income_type"].map(
+    income_bar_long["income_type"] = income_bar_long["income_type"].map(
         {
-            "finance_income": finance_label,
-            "comprehensive_income": comprehensive_label,
+            "finance_income_mtd": mtd_label_finance,
+            "comprehensive_income_mtd": mtd_label_comprehensive,
         }
     )
-    income_chart = (
-        alt.Chart(income_long)
+    income_line_long = monthly.melt(
+        id_vars=["snapshot_month"],
+        value_vars=["finance_income_ytd", "comprehensive_income_ytd"],
+        var_name="income_type",
+        value_name="income_value",
+    )
+    income_line_long["income_type"] = income_line_long["income_type"].map(
+        {
+            "finance_income_ytd": ytd_label_finance,
+            "comprehensive_income_ytd": ytd_label_comprehensive,
+        }
+    )
+    income_domain = [
+        mtd_label_finance,
+        mtd_label_comprehensive,
+        ytd_label_finance,
+        ytd_label_comprehensive,
+    ]
+    income_colors = [NEUTRAL_COLOR, POSITIVE_COLOR, "#6F7F92", "#0B1A45"]
+    income_tooltip = [
+        alt.Tooltip("snapshot_month:N", title="月份"),
+        alt.Tooltip("income_type:N", title="收益口径"),
+        alt.Tooltip("income_value:Q", title="收益(亿)", format=",.2f"),
+    ]
+    income_bars = (
+        alt.Chart(income_bar_long)
         .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
         .encode(
-            x=alt.X(
-                "snapshot_month:N",
-                title=None,
-                sort=month_order,
-                axis=alt.Axis(labelAngle=0),
-            ),
-            xOffset=alt.XOffset("income_type:N", sort=[finance_label, comprehensive_label]),
+            x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
+            xOffset=alt.XOffset("income_type:N", sort=[mtd_label_finance, mtd_label_comprehensive]),
             y=alt.Y("income_value:Q", title="收益(亿)"),
             color=alt.Color(
                 "income_type:N",
                 title=None,
-                scale=alt.Scale(
-                    domain=[finance_label, comprehensive_label],
-                    range=[NEUTRAL_COLOR, POSITIVE_COLOR],
-                ),
-                legend=alt.Legend(orient="top"),
+                scale=alt.Scale(domain=income_domain, range=income_colors),
+                legend=alt.Legend(orient="top", columns=2),
             ),
-            tooltip=[
-                alt.Tooltip("snapshot_month:N", title="月份"),
-                alt.Tooltip("income_type:N", title="收益口径"),
-                alt.Tooltip("income_value:Q", title="收益(亿)", format=",.2f"),
-            ],
+            tooltip=income_tooltip,
         )
-        .properties(title=f"{comparison_mode}收益", height=300)
+    )
+    income_lines = (
+        alt.Chart(income_line_long)
+        .mark_line(point=alt.OverlayMarkDef(size=65), strokeWidth=2.5)
+        .encode(
+            x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("income_value:Q", title="收益(亿)"),
+            color=alt.Color(
+                "income_type:N",
+                title=None,
+                scale=alt.Scale(domain=income_domain, range=income_colors),
+                legend=alt.Legend(orient="top", columns=2),
+            ),
+            tooltip=income_tooltip,
+        )
+    )
+    zero_rule = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color="#475569", opacity=0.45).encode(y="y:Q")
+    income_chart = (
+        (income_bars + income_lines + zero_rule)
+        .properties(title="收益趋势：当月30天 + 年初以来", height=300)
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
 
     trend_cols = st.columns([0.9, 1.1])
-    trend_cols[0].altair_chart(market_chart, width="stretch")
+    trend_cols[0].altair_chart(scale_chart, width="stretch")
     trend_cols[1].altair_chart(income_chart, width="stretch")
 
 
@@ -1430,7 +1510,7 @@ def main() -> None:
 
     section_anchor("charts-overview")
     st.subheader("图表总览")
-    show_block_note(f"柱状图按全组合逐月汇总；收益采用{period_label}口径，市值展示各月全价市值。")
+    show_block_note("左图用柱展示全组合规模、用折线展示正回购融资余额；右图用柱展示当月30天收益、用折线展示年初以来累计收益。")
     render_monthly_trends(data, comparison_mode)
 
     st.divider()
