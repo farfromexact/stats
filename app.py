@@ -402,6 +402,8 @@ DISPLAY_NAMES = {
     "full_market_value_delta": "全价市值变化(亿)",
     "finance_income_mtd_current": "当前本月财务收益(亿)",
     "comprehensive_income_mtd_current": "当前本月综合收益(亿)",
+    "finance_income_mtd_delta": "财务收益变化(亿)",
+    "comprehensive_income_mtd_delta": "综合收益变化(亿)",
     "avg_capital_mtd_current": "当前平均资金占用(亿)",
     "finance_return_mtd": "本月财务收益率",
     "comprehensive_return_mtd": "本月综合收益率",
@@ -430,6 +432,8 @@ AMOUNT_COLUMNS = {
     "full_market_value_delta",
     "finance_income_mtd_current",
     "comprehensive_income_mtd_current",
+    "finance_income_mtd_delta",
+    "comprehensive_income_mtd_delta",
     "avg_capital_mtd_current",
 }
 PCT_COLUMNS = {"finance_return_mtd", "comprehensive_return_mtd"}
@@ -646,6 +650,23 @@ def show_block_note(text: str) -> None:
     st.caption(f"口径说明：{text}")
 
 
+def income_chart_config(comparison_mode: str, title_prefix: str, title_suffix: str) -> tuple[str, str, str]:
+    if comparison_mode == "较所选月份":
+        metric = "comprehensive_income_mtd_delta"
+        return (
+            metric,
+            f"{title_prefix}综合收益变化{title_suffix}",
+            display_names_for_mode(comparison_mode)[metric],
+        )
+
+    metric = "comprehensive_income_mtd_current"
+    return (
+        metric,
+        f"{title_prefix}综合收益贡献{title_suffix}",
+        display_names_for_mode(comparison_mode)[metric],
+    )
+
+
 def section_anchor(anchor_id: str) -> None:
     st.markdown(f'<span id="{anchor_id}"></span>', unsafe_allow_html=True)
 
@@ -837,8 +858,19 @@ def render_bar_chart(
     ]
     if label_col == "asset_class":
         tooltips.append(alt.Tooltip("_color_note:N", title="颜色口径"))
-    for column in ["full_market_value_current", "full_market_value_delta", "comprehensive_return_mtd"]:
+    for column in [
+        "finance_income_mtd_current",
+        "comprehensive_income_mtd_current",
+        "finance_income_mtd_delta",
+        "comprehensive_income_mtd_delta",
+        "full_market_value_current",
+        "full_market_value_delta",
+        "finance_return_mtd",
+        "comprehensive_return_mtd",
+    ]:
         if column not in chart_data.columns:
+            continue
+        if column == metric:
             continue
         chart_data[column] = pd.to_numeric(chart_data[column], errors="coerce")
         tooltip_title = display_names_for_mode(comparison_mode).get(column, column)
@@ -1299,17 +1331,22 @@ def main() -> None:
     section_anchor("asset-class-overview")
     st.subheader("投资品种总览：规模变化与收益贡献")
     show_block_note(
-        f"本表不分账户，直接按投资品种汇总，用于回答股票、债券、存款等品种分别挣了多少钱；当前采用{comparison_mode}口径。"
+        f"本表不分账户，直接按投资品种汇总；较所选月份时收益图展示当前月相对对比月的综合收益变化，年初以来时展示年初以来综合收益。"
     )
     asset_class_display = asset_class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
+    asset_income_metric, asset_income_title, asset_income_value_title = income_chart_config(
+        comparison_mode,
+        "投资品种",
+        " Top/Bottom",
+    )
     asset_chart_cols = st.columns(2)
     with asset_chart_cols[0]:
         render_bar_chart(
             asset_class_summary,
-            "comprehensive_income_mtd_current",
+            asset_income_metric,
             "asset_class",
-            "投资品种综合收益贡献 Top/Bottom",
-            display_names_for_mode(comparison_mode)["comprehensive_income_mtd_current"],
+            asset_income_title,
+            asset_income_value_title,
             comparison_mode=comparison_mode,
             empty_message="当前投资品种暂无可展示的收益贡献。",
         )
@@ -1349,15 +1386,20 @@ def main() -> None:
     section_anchor("account-overview")
     st.subheader("账户层：规模变化与收益贡献")
     show_block_note(
-        f"本表用于回答哪个账户规模增加或减少、哪个账户贡献收益；收益率 = {period_label}收益 / {capital_label}，资金占用无效时显示为“—”。"
+        f"本表用于回答哪个账户规模增加或减少、哪个账户贡献收益；较所选月份时收益图展示当前月相对对比月的综合收益变化；收益率 = {period_label}收益 / {capital_label}。"
     )
     account_display = account_summary.sort_values("full_market_value_delta", ascending=False)
+    account_income_metric, account_income_title, account_income_value_title = income_chart_config(
+        comparison_mode,
+        "账户",
+        "排行",
+    )
     render_bar_chart(
         account_summary,
-        "comprehensive_income_mtd_current",
+        account_income_metric,
         "account_bucket",
-        "账户综合收益贡献排行",
-        display_names_for_mode(comparison_mode)["comprehensive_income_mtd_current"],
+        account_income_title,
+        account_income_value_title,
         limit=12,
         selection="abs",
         comparison_mode=comparison_mode,
