@@ -795,6 +795,7 @@ def render_bar_chart(
     limit: int = 8,
     selection: str = "top_bottom",
     comparison_mode: str = "较所选月份",
+    compact: bool = False,
     empty_message: str = "暂无可展示的图表数据。",
 ) -> None:
     if selection == "abs":
@@ -831,20 +832,31 @@ def render_bar_chart(
     chart_data = chart_data[chart_data["_value"].abs() > CHART_EPSILON]
     chart_data = chart_data.sort_values("_value", ascending=False)
 
+    display_names = display_names_for_mode(comparison_mode)
     tooltips = [
-        alt.Tooltip("_label:N", title=display_names_for_mode(comparison_mode).get(label_col, label_col)),
+        alt.Tooltip("_label:N", title=display_names.get(label_col, label_col)),
         alt.Tooltip("_value:Q", title=value_title, format=",.2f"),
     ]
     if label_col == "asset_class":
         tooltips.append(alt.Tooltip("_color_note:N", title="颜色口径"))
-    for column in ["full_market_value_current", "full_market_value_delta", "comprehensive_return_mtd"]:
+    for column in [
+        "finance_income_mtd_current",
+        "comprehensive_income_mtd_current",
+        "finance_return_mtd",
+        "comprehensive_return_mtd",
+        "full_market_value_current",
+        "full_market_value_delta",
+    ]:
         if column not in chart_data.columns:
             continue
         chart_data[column] = pd.to_numeric(chart_data[column], errors="coerce")
-        tooltip_title = display_names_for_mode(comparison_mode).get(column, column)
+        tooltip_title = display_names.get(column, column)
         tooltip_format = ".2%" if column in PCT_COLUMNS else ",.2f"
         tooltips.append(alt.Tooltip(f"{column}:Q", title=tooltip_title, format=tooltip_format))
 
+    chart_height = _bar_height(len(chart_data))
+    bar_width = 410 if compact else 620
+    return_width = 170 if compact else 250
     bars = (
         alt.Chart(chart_data)
         .mark_bar(cornerRadiusEnd=2)
@@ -871,11 +883,111 @@ def render_bar_chart(
     zero_rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#475569", opacity=0.55).encode(x="x:Q")
     chart = (
         (bars + zero_rule)
-        .properties(title=title, height=_bar_height(len(chart_data)))
+        .properties(title=title, height=chart_height, width=bar_width)
+    )
+
+    return_columns = {"finance_return_mtd", "comprehensive_return_mtd"}
+    if not return_columns.issubset(chart_data.columns):
+        st.altair_chart(
+            chart.configure_view(strokeWidth=0).configure_title(
+                anchor="start",
+                color=POSITIVE_COLOR,
+                fontSize=15,
+            ),
+            width="stretch",
+        )
+        return
+
+    return_frame = chart_data[
+        ["_label", "_value", "finance_return_mtd", "comprehensive_return_mtd"]
+    ].copy()
+    return_long = return_frame.melt(
+        id_vars=["_label", "_value", "finance_return_mtd", "comprehensive_return_mtd"],
+        value_vars=["finance_return_mtd", "comprehensive_return_mtd"],
+        var_name="_return_type",
+        value_name="_return_value",
+    )
+    return_long["_return_label"] = return_long["_return_type"].map(
+        {
+            "finance_return_mtd": display_names["finance_return_mtd"],
+            "comprehensive_return_mtd": display_names["comprehensive_return_mtd"],
+        }
+    )
+    return_long = return_long.dropna(subset=["_return_value"])
+    if return_long.empty:
+        st.altair_chart(
+            chart.configure_view(strokeWidth=0).configure_title(
+                anchor="start",
+                color=POSITIVE_COLOR,
+                fontSize=15,
+            ),
+            width="stretch",
+        )
+        return
+
+    segment_data = return_frame.dropna(subset=["finance_return_mtd", "comprehensive_return_mtd"])
+    return_tooltips = [
+        alt.Tooltip("_label:N", title=display_names.get(label_col, label_col)),
+        alt.Tooltip("_return_label:N", title="收益率口径"),
+        alt.Tooltip("_return_value:Q", title="收益率", format=".2%"),
+        alt.Tooltip("finance_return_mtd:Q", title=display_names["finance_return_mtd"], format=".2%"),
+        alt.Tooltip("comprehensive_return_mtd:Q", title=display_names["comprehensive_return_mtd"], format=".2%"),
+    ]
+    segment_tooltips = [
+        alt.Tooltip("_label:N", title=display_names.get(label_col, label_col)),
+        alt.Tooltip("finance_return_mtd:Q", title=display_names["finance_return_mtd"], format=".2%"),
+        alt.Tooltip("comprehensive_return_mtd:Q", title=display_names["comprehensive_return_mtd"], format=".2%"),
+    ]
+    return_y = alt.Y(
+        "_label:N",
+        title=None,
+        sort=alt.SortField(field="_value", order="descending"),
+        axis=alt.Axis(labels=False, ticks=False, domain=False),
+    )
+    return_segment = (
+        alt.Chart(segment_data)
+        .mark_rule(color="#A8A29E", opacity=0.75, strokeWidth=1.4)
+        .encode(
+            x=alt.X("finance_return_mtd:Q", title="收益率", axis=alt.Axis(format=".1%")),
+            x2="comprehensive_return_mtd:Q",
+            y=return_y,
+            tooltip=segment_tooltips,
+        )
+    )
+    return_points = (
+        alt.Chart(return_long)
+        .mark_point(filled=True, size=58)
+        .encode(
+            x=alt.X("_return_value:Q", title="收益率", axis=alt.Axis(format=".1%")),
+            y=return_y,
+            color=alt.Color(
+                "_return_label:N",
+                title=None,
+                scale=alt.Scale(
+                    domain=[display_names["finance_return_mtd"], display_names["comprehensive_return_mtd"]],
+                    range=[NEUTRAL_COLOR, POSITIVE_COLOR],
+                ),
+                legend=alt.Legend(orient="top", direction="horizontal"),
+            ),
+            tooltip=return_tooltips,
+        )
+    )
+    return_zero = (
+        alt.Chart(pd.DataFrame({"x": [0]}))
+        .mark_rule(color="#475569", opacity=0.45)
+        .encode(x="x:Q")
+    )
+    return_chart = (
+        (return_segment + return_points + return_zero)
+        .properties(title="财务/综合收益率", height=chart_height, width=return_width)
+    )
+    composite = (
+        alt.hconcat(chart, return_chart, spacing=18)
+        .resolve_scale(x="independent", color="independent")
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
-    st.altair_chart(chart, width="stretch")
+    st.altair_chart(composite, width="stretch")
 
 
 def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
@@ -1311,6 +1423,7 @@ def main() -> None:
             "投资品种综合收益贡献 Top/Bottom",
             display_names_for_mode(comparison_mode)["comprehensive_income_mtd_current"],
             comparison_mode=comparison_mode,
+            compact=True,
             empty_message="当前投资品种暂无可展示的收益贡献。",
         )
     with asset_chart_cols[1]:
@@ -1321,6 +1434,7 @@ def main() -> None:
             "投资品种规模变化 Top/Bottom",
             display_names_for_mode(comparison_mode)["full_market_value_delta"],
             comparison_mode=comparison_mode,
+            compact=True,
             empty_message="当前投资品种暂无可展示的规模变化。",
         )
     st.dataframe(
