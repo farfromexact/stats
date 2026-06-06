@@ -26,6 +26,8 @@ POSITIVE_COLOR = "#122256"
 NEGATIVE_COLOR = "#8B2F2F"
 NEUTRAL_COLOR = "#8EA0B6"
 FUNDING_COLOR = "#6F7F92"
+HIGHLIGHT_COLOR = "#C88439"
+CORE_ACCOUNT_LABELS = {"传统", "自有", "自由", "分红一", "分红1", "分红二", "分红2"}
 REPO_FINANCING_ASSET_CLASSES = {"正回购"}
 REVERSE_REPO_ASSET_CLASSES = {"逆回购", "买入返售"}
 FUNDING_ASSET_CLASSES = REPO_FINANCING_ASSET_CLASSES | REVERSE_REPO_ASSET_CLASSES
@@ -881,8 +883,10 @@ def render_bar_chart(
     comparison_mode: str = "单月复盘",
     empty_message: str = "暂无可展示的图表数据。",
     label_order: list[str] | None = None,
+    highlight_labels: set[str] | None = None,
 ) -> None:
     normalized_label_order = [str(label) for label in label_order or []]
+    normalized_highlight_labels = {str(label) for label in highlight_labels or set()}
     if normalized_label_order:
         chart_data = frame.copy()
         chart_data["_label_for_selection"] = chart_data[label_col].astype(str)
@@ -902,6 +906,7 @@ def render_bar_chart(
     chart_data = chart_data.copy()
     chart_data["_label"] = chart_data[label_col].astype(str)
     chart_data["_value"] = _numeric_series(chart_data, metric)
+    chart_data["_is_highlighted"] = chart_data["_label"].isin(normalized_highlight_labels)
     chart_data["_is_funding_asset_class"] = False
     if label_col == "asset_class":
         chart_data["_is_funding_asset_class"] = chart_data[label_col].map(is_funding_asset_class)
@@ -913,10 +918,12 @@ def render_bar_chart(
     chart_data["_bar_color_group"] = np.select(
         [
             chart_data["_is_funding_asset_class"],
+            chart_data["_is_highlighted"],
             chart_data["_value"] >= 0,
         ],
         [
             "回购/融资",
+            "核心账户",
             "正向",
         ],
         default="负向",
@@ -933,6 +940,9 @@ def render_bar_chart(
     ]
     if label_col == "asset_class":
         tooltips.append(alt.Tooltip("_color_note:N", title="颜色口径"))
+    if normalized_highlight_labels:
+        chart_data["_highlight_note"] = np.where(chart_data["_is_highlighted"], "核心账户", "其他账户")
+        tooltips.append(alt.Tooltip("_highlight_note:N", title="账户标记"))
     for column in [
         "finance_income_mtd_current",
         "comprehensive_income_mtd_current",
@@ -973,8 +983,8 @@ def render_bar_chart(
                 "_bar_color_group:N",
                 title=None,
                 scale=alt.Scale(
-                    domain=["正向", "负向", "回购/融资"],
-                    range=[POSITIVE_COLOR, NEGATIVE_COLOR, FUNDING_COLOR],
+                    domain=["正向", "负向", "回购/融资", "核心账户"],
+                    range=[POSITIVE_COLOR, NEGATIVE_COLOR, FUNDING_COLOR, HIGHLIGHT_COLOR],
                 ),
                 legend=None,
             ),
@@ -1590,20 +1600,47 @@ def main() -> None:
     section_anchor("account-overview")
     st.subheader("账户层：规模变化与收益贡献")
     show_block_note(
-        f"本表用于回答哪个账户收益效率更高；主图展示综合收益率，tooltip 保留收益额、规模变化和资金占用；收益率 = {period_label}收益 / {capital_label}。"
+        f"本表用于回答哪个账户收益效率更高；左图展示综合收益率，右图展示财务收益率；tooltip 保留收益额、规模变化和资金占用；收益率 = {period_label}收益 / {capital_label}。"
     )
     account_display = account_summary.sort_values("full_market_value_delta", ascending=False)
-    render_bar_chart(
-        account_summary,
-        "comprehensive_return_mtd",
-        "account_bucket",
-        "账户综合收益率排行",
-        display_names_for_mode(comparison_mode)["comprehensive_return_mtd"],
-        limit=12,
-        selection="abs",
-        comparison_mode=comparison_mode,
-        empty_message="当前账户暂无可展示的综合收益率。",
-    )
+    existing_accounts = set(account_summary["account_bucket"].astype(str).tolist())
+    account_highlights = CORE_ACCOUNT_LABELS & existing_accounts
+    account_chart_labels = top_by_abs(account_summary, "comprehensive_return_mtd", 12)[
+        "account_bucket"
+    ].astype(str).tolist()
+    for label in ["传统", "自有", "自由", "分红一", "分红1", "分红二", "分红2"]:
+        if label in existing_accounts and label not in account_chart_labels:
+            account_chart_labels.append(label)
+
+    account_chart_cols = st.columns(2)
+    with account_chart_cols[0]:
+        render_bar_chart(
+            account_summary,
+            "comprehensive_return_mtd",
+            "account_bucket",
+            "账户综合收益率排行",
+            display_names_for_mode(comparison_mode)["comprehensive_return_mtd"],
+            limit=12,
+            selection="abs",
+            comparison_mode=comparison_mode,
+            empty_message="当前账户暂无可展示的综合收益率。",
+            label_order=account_chart_labels,
+            highlight_labels=account_highlights,
+        )
+    with account_chart_cols[1]:
+        render_bar_chart(
+            account_summary,
+            "finance_return_mtd",
+            "account_bucket",
+            "账户财务收益率排行",
+            display_names_for_mode(comparison_mode)["finance_return_mtd"],
+            limit=12,
+            selection="abs",
+            comparison_mode=comparison_mode,
+            empty_message="当前账户暂无可展示的财务收益率。",
+            label_order=account_chart_labels,
+            highlight_labels=account_highlights,
+        )
     st.dataframe(
         format_table(
             account_display[
