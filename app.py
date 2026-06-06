@@ -1175,6 +1175,23 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
             tooltip=income_tooltip,
         )
     )
+    income_lines = (
+        alt.Chart(income_point_long)
+        .mark_line(strokeWidth=2.4, opacity=0.9)
+        .encode(
+            x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
+            xOffset=alt.XOffset("offset_type:N", sort=[mtd_label_finance, mtd_label_comprehensive]),
+            y=alt.Y("income_value:Q", title="收益(亿)"),
+            color=alt.Color(
+                "income_type:N",
+                title=None,
+                scale=alt.Scale(domain=income_domain, range=income_colors),
+                legend=alt.Legend(orient="top", columns=2),
+            ),
+            detail=alt.Detail("income_type:N"),
+            tooltip=income_tooltip,
+        )
+    )
     income_points = (
         alt.Chart(income_point_long)
         .mark_point(filled=True, size=100, stroke="white", strokeWidth=1.4)
@@ -1193,8 +1210,8 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     )
     zero_rule = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color="#475569", opacity=0.45).encode(y="y:Q")
     income_chart = (
-        (income_bars + income_points + zero_rule)
-        .properties(title="收益趋势：当月30天 + 年初以来累计点", height=300)
+        (income_bars + income_lines + income_points + zero_rule)
+        .properties(title="收益趋势：当月30天 + 年初以来累计趋势", height=300)
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
