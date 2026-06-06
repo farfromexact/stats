@@ -26,6 +26,10 @@ REQUIRED_FIELDS = [
     "综合收益（本年以来）(亿)",
 ]
 
+OPTIONAL_FIELDS = [
+    "久期",
+]
+
 FIELD_MAP = {
     "资产名称": "asset_name",
     "资产代码": "asset_code",
@@ -46,6 +50,7 @@ FIELD_MAP = {
     "综合收益（本月以来）(亿)": "comprehensive_income_mtd",
     "财务收益（本年以来）(亿)": "finance_income_ytd",
     "综合收益（本年以来）(亿)": "comprehensive_income_ytd",
+    "久期": "duration",
 }
 
 NUMERIC_COLUMNS = [
@@ -58,6 +63,7 @@ NUMERIC_COLUMNS = [
     "comprehensive_income_mtd",
     "finance_income_ytd",
     "comprehensive_income_ytd",
+    "duration",
 ]
 
 DISPLAY_METRICS = [

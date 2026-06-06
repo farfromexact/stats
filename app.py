@@ -20,14 +20,25 @@ from portfolio_data import available_months, load_snapshots
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
-DATA_SCHEMA_VERSION = "2026-06-02-may-snapshot-v1"
+DATA_SCHEMA_VERSION = "2026-06-06-duration-v1"
 CHART_EPSILON = 1e-9
 POSITIVE_COLOR = "#122256"
 NEGATIVE_COLOR = "#8B2F2F"
 NEUTRAL_COLOR = "#8EA0B6"
 FUNDING_COLOR = "#6F7F92"
-HIGHLIGHT_COLOR = "#C88439"
-CORE_ACCOUNT_LABELS = {"传统", "自有", "自由", "分红一", "分红1", "分红二", "分红2"}
+ACCOUNT_ORDER_PREFIX = [
+    "传统",
+    "自有",
+    "分红一",
+    "分红1",
+    "分红二",
+    "分红2",
+    "万能一",
+    "万能二",
+    "万能三",
+    "万能四",
+    "穿透账户",
+]
 REPO_FINANCING_ASSET_CLASSES = {"正回购"}
 REVERSE_REPO_ASSET_CLASSES = {"逆回购", "买入返售"}
 FUNDING_ASSET_CLASSES = REPO_FINANCING_ASSET_CLASSES | REVERSE_REPO_ASSET_CLASSES
@@ -380,6 +391,7 @@ DISPLAY_NAMES = {
     "full_market_value": "全价市值(亿)",
     "finance_income_mtd": "本月财务收益(亿)",
     "comprehensive_income_mtd": "本月综合收益(亿)",
+    "duration": "久期",
     "account_bucket": "账户",
     "mandate_type": "委受托维度",
     "asset_class": "投资品种",
@@ -404,6 +416,10 @@ DISPLAY_NAMES = {
     "record_count_current": "当前记录数",
     "source_rows_current": "当前源行数",
     "source_rows_prior": "上月源行数",
+    "weighted_duration": "账户加权久期",
+    "duration_market_value": "纳入久期计算市值(亿)",
+    "duration_coverage_ratio": "久期市值覆盖率",
+    "duration_asset_count": "纳入久期资产数",
 }
 
 YTD_DISPLAY_OVERRIDES = {
@@ -435,14 +451,17 @@ AMOUNT_COLUMNS = {
     "finance_income_period",
     "comprehensive_income_period",
     "avg_capital_mtd_current",
+    "duration_market_value",
 }
-PCT_COLUMNS = {"finance_return_mtd", "comprehensive_return_mtd"}
+PCT_COLUMNS = {"finance_return_mtd", "comprehensive_return_mtd", "duration_coverage_ratio"}
+DURATION_COLUMNS = {"duration", "weighted_duration"}
 COUNT_COLUMNS = {
     "record_count",
     "record_count_current",
     "source_rows",
     "source_rows_current",
     "source_rows_prior",
+    "duration_asset_count",
 }
 
 
@@ -521,6 +540,8 @@ def format_table(frame: pd.DataFrame, precision: str = "display", comparison_mod
             formatters[display_col] = f"{{:,.{amount_decimals}f}}"
         elif source_col in PCT_COLUMNS:
             formatters[display_col] = "{:.2%}"
+        elif source_col in DURATION_COLUMNS:
+            formatters[display_col] = "{:,.2f}"
         elif source_col in COUNT_COLUMNS:
             formatters[display_col] = "{:,.0f}"
     return display.style.format(formatters, na_rep="—")
@@ -682,6 +703,27 @@ def selected_label(value: str) -> str:
     return "全部" if value == ALL else value
 
 
+def ordered_account_labels(labels: pd.Series | list[object], include_remaining: bool = True) -> list[str]:
+    existing = [str(label) for label in labels if pd.notna(label)]
+    seen: set[str] = set()
+    ordered: list[str] = []
+
+    def append(label: str) -> None:
+        if label in existing and label not in seen:
+            ordered.append(label)
+            seen.add(label)
+
+    for label in ACCOUNT_ORDER_PREFIX:
+        append(label)
+
+    perpetual = sorted([label for label in existing if "永续债" in label and label not in seen])
+    remaining = sorted([label for label in existing if label not in seen and label not in perpetual])
+    tail = remaining + perpetual if include_remaining else perpetual
+    for label in tail:
+        append(label)
+    return ordered
+
+
 def is_funding_asset_class(value: object) -> bool:
     return str(value).strip() in FUNDING_ASSET_CLASSES
 
@@ -712,6 +754,7 @@ def sidebar_nav() -> None:
         <a class="sidebar-nav-button" href="#charts-overview">图表总览</a>
         <a class="sidebar-nav-button" href="#asset-class-overview">投资品种图表/表格</a>
         <a class="sidebar-nav-button" href="#account-overview">账户层图表/表格</a>
+        <a class="sidebar-nav-button" href="#duration-overview">账户久期</a>
         <a class="sidebar-nav-button" href="#account-class-breakdown">账户内品种拆解</a>
         <a class="sidebar-nav-button" href="#asset-evidence">资产证据</a>
         <a class="sidebar-nav-button" href="#quality-checks">数据质量</a>
@@ -883,10 +926,8 @@ def render_bar_chart(
     comparison_mode: str = "单月复盘",
     empty_message: str = "暂无可展示的图表数据。",
     label_order: list[str] | None = None,
-    highlight_labels: set[str] | None = None,
 ) -> None:
     normalized_label_order = [str(label) for label in label_order or []]
-    normalized_highlight_labels = {str(label) for label in highlight_labels or set()}
     if normalized_label_order:
         chart_data = frame.copy()
         chart_data["_label_for_selection"] = chart_data[label_col].astype(str)
@@ -906,7 +947,6 @@ def render_bar_chart(
     chart_data = chart_data.copy()
     chart_data["_label"] = chart_data[label_col].astype(str)
     chart_data["_value"] = _numeric_series(chart_data, metric)
-    chart_data["_is_highlighted"] = chart_data["_label"].isin(normalized_highlight_labels)
     chart_data["_is_funding_asset_class"] = False
     if label_col == "asset_class":
         chart_data["_is_funding_asset_class"] = chart_data[label_col].map(is_funding_asset_class)
@@ -918,12 +958,10 @@ def render_bar_chart(
     chart_data["_bar_color_group"] = np.select(
         [
             chart_data["_is_funding_asset_class"],
-            chart_data["_is_highlighted"],
             chart_data["_value"] >= 0,
         ],
         [
             "回购/融资",
-            "核心账户",
             "正向",
         ],
         default="负向",
@@ -940,9 +978,6 @@ def render_bar_chart(
     ]
     if label_col == "asset_class":
         tooltips.append(alt.Tooltip("_color_note:N", title="颜色口径"))
-    if normalized_highlight_labels:
-        chart_data["_highlight_note"] = np.where(chart_data["_is_highlighted"], "核心账户", "其他账户")
-        tooltips.append(alt.Tooltip("_highlight_note:N", title="账户标记"))
     for column in [
         "finance_income_mtd_current",
         "comprehensive_income_mtd_current",
@@ -983,8 +1018,8 @@ def render_bar_chart(
                 "_bar_color_group:N",
                 title=None,
                 scale=alt.Scale(
-                    domain=["正向", "负向", "回购/融资", "核心账户"],
-                    range=[POSITIVE_COLOR, NEGATIVE_COLOR, FUNDING_COLOR, HIGHLIGHT_COLOR],
+                    domain=["正向", "负向", "回购/融资"],
+                    range=[POSITIVE_COLOR, NEGATIVE_COLOR, FUNDING_COLOR],
                 ),
                 legend=None,
             ),
@@ -995,6 +1030,109 @@ def render_bar_chart(
     chart = (
         (bars + zero_rule)
         .properties(title=title, height=_bar_height(len(chart_data)))
+        .configure_view(strokeWidth=0)
+        .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+    )
+    st.altair_chart(chart, width="stretch")
+
+
+def account_duration_summary(data: pd.DataFrame, current_month: str) -> pd.DataFrame:
+    columns = [
+        "account_bucket",
+        "weighted_duration",
+        "duration_market_value",
+        "duration_coverage_ratio",
+        "duration_asset_count",
+        "full_market_value_current",
+    ]
+    if data.empty or "duration" not in data.columns:
+        return pd.DataFrame(columns=columns)
+
+    current = data[data["snapshot_month"] == current_month].copy()
+    if current.empty:
+        return pd.DataFrame(columns=columns)
+
+    current["duration"] = pd.to_numeric(current["duration"], errors="coerce")
+    current["full_market_value"] = pd.to_numeric(current["full_market_value"], errors="coerce").fillna(0.0)
+    valid = (current["duration"] > CHART_EPSILON) & (current["full_market_value"] > CHART_EPSILON)
+    current["_positive_market_value"] = current["full_market_value"].clip(lower=0.0)
+    current["_duration_market_value"] = np.where(valid, current["full_market_value"], 0.0)
+    current["_duration_weighted_sum"] = np.where(
+        valid,
+        current["duration"] * current["full_market_value"],
+        0.0,
+    )
+    current["_duration_asset_count"] = valid.astype(int)
+
+    summary = (
+        current.groupby("account_bucket", dropna=False)
+        .agg(
+            full_market_value_current=("full_market_value", "sum"),
+            positive_market_value=("_positive_market_value", "sum"),
+            duration_market_value=("_duration_market_value", "sum"),
+            duration_weighted_sum=("_duration_weighted_sum", "sum"),
+            duration_asset_count=("_duration_asset_count", "sum"),
+        )
+        .reset_index()
+    )
+    summary["weighted_duration"] = np.where(
+        summary["duration_market_value"].abs() > CHART_EPSILON,
+        summary["duration_weighted_sum"] / summary["duration_market_value"],
+        np.nan,
+    )
+    summary["duration_coverage_ratio"] = np.where(
+        summary["positive_market_value"].abs() > CHART_EPSILON,
+        summary["duration_market_value"] / summary["positive_market_value"],
+        np.nan,
+    )
+    return summary[columns]
+
+
+def render_duration_chart(duration_summary: pd.DataFrame, comparison_mode: str) -> None:
+    if duration_summary.empty or "weighted_duration" not in duration_summary:
+        st.info("当前源数据没有可展示的久期字段。")
+        return
+
+    chart_data = duration_summary.copy()
+    chart_data["weighted_duration"] = pd.to_numeric(chart_data["weighted_duration"], errors="coerce")
+    chart_data = chart_data[chart_data["weighted_duration"].notna()]
+    if chart_data.empty:
+        st.info("当前账户暂无可展示的有效久期。")
+        return
+
+    account_order = ordered_account_labels(chart_data["account_bucket"].tolist())
+    chart_data["account_bucket"] = chart_data["account_bucket"].astype(str)
+    tooltips = [
+        alt.Tooltip("account_bucket:N", title="账户"),
+        alt.Tooltip("weighted_duration:Q", title="账户加权久期", format=",.2f"),
+        alt.Tooltip("duration_market_value:Q", title="纳入久期计算市值(亿)", format=",.2f"),
+        alt.Tooltip("duration_coverage_ratio:Q", title="久期市值覆盖率", format=".2%"),
+        alt.Tooltip(
+            "full_market_value_current:Q",
+            title=display_names_for_mode(comparison_mode)["full_market_value_current"],
+            format=",.2f",
+        ),
+        alt.Tooltip("duration_asset_count:Q", title="纳入久期资产数", format=",.0f"),
+    ]
+    chart = (
+        alt.Chart(chart_data)
+        .mark_bar(color=POSITIVE_COLOR, cornerRadiusEnd=2)
+        .encode(
+            x=alt.X(
+                "weighted_duration:Q",
+                title="账户加权久期",
+                axis=alt.Axis(format=",.1f"),
+                scale=alt.Scale(zero=True),
+            ),
+            y=alt.Y(
+                "account_bucket:N",
+                title=None,
+                sort=account_order,
+                axis=alt.Axis(labelLimit=180),
+            ),
+            tooltip=tooltips,
+        )
+        .properties(title="账户加权久期", height=_bar_height(len(chart_data)))
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
@@ -1086,6 +1224,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
                 scale=alt.Scale(domain=[market_baseline, market_max + market_padding]),
             ),
             text=alt.Text("full_market_value:Q", format=",.0f"),
+            tooltip=scale_tooltip,
         )
     )
     repo_line = (
@@ -1113,6 +1252,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
                 scale=alt.Scale(zero=False),
             ),
             text=alt.Text("repo_financing:Q", format=",.0f"),
+            tooltip=scale_tooltip,
         )
     )
     scale_chart = (
@@ -1603,14 +1743,7 @@ def main() -> None:
         f"本表用于回答哪个账户收益效率更高；左图展示综合收益率，右图展示财务收益率；tooltip 保留收益额、规模变化和资金占用；收益率 = {period_label}收益 / {capital_label}。"
     )
     account_display = account_summary.sort_values("full_market_value_delta", ascending=False)
-    existing_accounts = set(account_summary["account_bucket"].astype(str).tolist())
-    account_highlights = CORE_ACCOUNT_LABELS & existing_accounts
-    account_chart_labels = top_by_abs(account_summary, "comprehensive_return_mtd", 12)[
-        "account_bucket"
-    ].astype(str).tolist()
-    for label in ["传统", "自有", "自由", "分红一", "分红1", "分红二", "分红2"]:
-        if label in existing_accounts and label not in account_chart_labels:
-            account_chart_labels.append(label)
+    account_chart_labels = ordered_account_labels(account_summary["account_bucket"].tolist(), include_remaining=False)
 
     account_chart_cols = st.columns(2)
     with account_chart_cols[0]:
@@ -1625,7 +1758,6 @@ def main() -> None:
             comparison_mode=comparison_mode,
             empty_message="当前账户暂无可展示的综合收益率。",
             label_order=account_chart_labels,
-            highlight_labels=account_highlights,
         )
     with account_chart_cols[1]:
         render_bar_chart(
@@ -1639,7 +1771,6 @@ def main() -> None:
             comparison_mode=comparison_mode,
             empty_message="当前账户暂无可展示的财务收益率。",
             label_order=account_chart_labels,
-            highlight_labels=account_highlights,
         )
     st.dataframe(
         format_table(
@@ -1662,6 +1793,41 @@ def main() -> None:
         width="stretch",
         hide_index=True,
     )
+
+    section_anchor("duration-overview")
+    st.subheader("账户久期：市值加权久期")
+    show_block_note(
+        "账户久期按金融市场惯例使用全价市值加权：Σ(资产久期 × 全价市值) / Σ(有有效久期资产全价市值)；"
+        "仅纳入久期大于 0 且全价市值大于 0 的资产，并展示久期市值覆盖率。"
+    )
+    duration_summary = account_duration_summary(data, current_month)
+    duration_order = ordered_account_labels(duration_summary["account_bucket"].tolist())
+    duration_display = duration_summary.copy()
+    duration_display["_account_order"] = pd.Categorical(
+        duration_display["account_bucket"].astype(str),
+        categories=duration_order,
+        ordered=True,
+    )
+    duration_display = duration_display.sort_values("_account_order")
+    render_duration_chart(duration_summary, comparison_mode)
+    if not duration_display.empty:
+        st.dataframe(
+            format_table(
+                duration_display[
+                    [
+                        "account_bucket",
+                        "weighted_duration",
+                        "duration_market_value",
+                        "duration_coverage_ratio",
+                        "duration_asset_count",
+                        "full_market_value_current",
+                    ]
+                ],
+                comparison_mode=comparison_mode,
+            ),
+            width="stretch",
+            hide_index=True,
+        )
 
     section_anchor("mandate-overview")
     st.subheader("委受托维度：规模变化与收益贡献")

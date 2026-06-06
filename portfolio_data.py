@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import DATA_DIR, FIELD_MAP, NUMERIC_COLUMNS, REQUIRED_FIELDS
+from config import DATA_DIR, FIELD_MAP, NUMERIC_COLUMNS, OPTIONAL_FIELDS, REQUIRED_FIELDS
 
 
 DATE_TOKEN = re.compile(r"(20\d{6})")
@@ -87,7 +87,12 @@ def _read_one(path: Path) -> tuple[pd.DataFrame | None, dict]:
         log["message"] = "缺少必需字段：" + "、".join(missing)
         return None, log
 
-    standard = raw[list(FIELD_MAP)].rename(columns=FIELD_MAP).copy()
+    source_columns = REQUIRED_FIELDS + [field for field in OPTIONAL_FIELDS if field in raw.columns]
+    standard = raw[source_columns].rename(columns=FIELD_MAP).copy()
+    for field in OPTIONAL_FIELDS:
+        column = FIELD_MAP[field]
+        if column not in standard.columns:
+            standard[column] = 0.0
     standard.insert(0, "source_row_no", raw.index + 2)
     standard.insert(0, "source_file_name", path.name)
     standard.insert(0, "source_file_hash", log["source_file_hash"])
