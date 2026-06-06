@@ -21,6 +21,7 @@ from portfolio_data import available_months, load_snapshots
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
 DATA_SCHEMA_VERSION = "2026-06-06-duration-v1"
+ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
 CHART_EPSILON = 1e-9
 POSITIVE_COLOR = "#122256"
 NEGATIVE_COLOR = "#8B2F2F"
@@ -423,6 +424,17 @@ DISPLAY_NAMES = {
     "duration_market_value": "纳入久期计算市值(亿)",
     "duration_coverage_ratio": "久期市值覆盖率",
     "duration_asset_count": "纳入久期资产数",
+    "plan_asset": "计划资产项",
+    "plan_balance": "计划余额(亿)",
+    "target_return_mid": "目标收益率中枢",
+    "target_return_low": "目标收益率下限",
+    "target_return_high": "目标收益率上限",
+    "target_return_range": "目标收益率区间",
+    "actual_ytd_comprehensive_return": "当前YTD综合收益率",
+    "actual_annualized_comprehensive_return": "当前年化综合收益率",
+    "return_completion_status": "是否达标",
+    "return_deviation": "偏离幅度",
+    "mapped_asset_classes": "映射投资品种",
 }
 
 YTD_DISPLAY_OVERRIDES = {
@@ -455,8 +467,19 @@ AMOUNT_COLUMNS = {
     "comprehensive_income_period",
     "avg_capital_mtd_current",
     "duration_market_value",
+    "plan_balance",
 }
-PCT_COLUMNS = {"finance_return_mtd", "comprehensive_return_mtd", "duration_coverage_ratio"}
+PCT_COLUMNS = {
+    "finance_return_mtd",
+    "comprehensive_return_mtd",
+    "duration_coverage_ratio",
+    "target_return_mid",
+    "target_return_low",
+    "target_return_high",
+    "actual_ytd_comprehensive_return",
+    "actual_annualized_comprehensive_return",
+    "return_deviation",
+}
 DURATION_COLUMNS = {"duration", "weighted_duration"}
 COUNT_COLUMNS = {
     "record_count",
@@ -1107,6 +1130,231 @@ def render_bar_chart(
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
     st.altair_chart(chart, width="stretch")
+
+
+def _month_count_for_annualization(current_month: str) -> int:
+    try:
+        month_number = int(str(current_month).split("-")[1])
+    except (IndexError, ValueError):
+        return 12
+    return max(1, min(12, month_number))
+
+
+def _split_plan_asset_classes(value: object) -> list[str]:
+    if pd.isna(value):
+        return []
+    return [item.strip() for item in str(value).split("|") if item.strip()]
+
+
+def load_asset_return_plan(path: Path) -> tuple[pd.DataFrame, str | None]:
+    required_columns = {
+        "plan_asset",
+        "display_order",
+        "plan_balance",
+        "target_return_mid",
+        "target_return_low",
+        "target_return_high",
+        "mapped_asset_classes",
+        "enabled",
+    }
+    if not path.exists():
+        return pd.DataFrame(columns=sorted(required_columns)), f"未找到资产收益计划配置表：{path}"
+
+    plan = pd.read_csv(path, encoding="utf-8-sig")
+    missing_columns = sorted(required_columns - set(plan.columns))
+    if missing_columns:
+        return pd.DataFrame(columns=sorted(required_columns)), "资产收益计划配置表缺少字段：" + "、".join(missing_columns)
+
+    plan = plan.copy()
+    plan["enabled"] = plan["enabled"].astype(str).str.lower().isin({"1", "true", "yes", "y", "是"})
+    plan = plan[plan["enabled"]].copy()
+    for column in [
+        "display_order",
+        "plan_balance",
+        "target_return_mid",
+        "target_return_low",
+        "target_return_high",
+    ]:
+        plan[column] = pd.to_numeric(plan[column], errors="coerce")
+    plan = plan.dropna(subset=["plan_asset", "display_order", "target_return_low", "target_return_high"])
+    return plan.sort_values("display_order"), None
+
+
+def asset_return_completion_summary(data: pd.DataFrame, current_month: str, plan: pd.DataFrame) -> pd.DataFrame:
+    if plan.empty:
+        return pd.DataFrame()
+
+    ytd_summary = ensure_summary_columns(
+        comparison_summary(data, current_month, current_month, ["asset_class"], "年初以来"),
+        "年初以来",
+    )
+    ytd_summary = ytd_summary.copy()
+    ytd_summary["asset_class"] = ytd_summary["asset_class"].astype(str)
+    months_elapsed = _month_count_for_annualization(current_month)
+    annualization_factor = 12 / months_elapsed
+
+    rows: list[dict[str, object]] = []
+    for _, plan_row in plan.iterrows():
+        mapped_classes = _split_plan_asset_classes(plan_row["mapped_asset_classes"])
+        matched = ytd_summary[ytd_summary["asset_class"].isin(mapped_classes)]
+        current_market_value = float(_numeric_series(matched, "full_market_value_current").sum())
+        comprehensive_income = float(_numeric_series(matched, "comprehensive_income_mtd_current").sum())
+        avg_capital = float(_numeric_series(matched, "avg_capital_mtd_current").sum())
+        actual_ytd_return = np.nan
+        if avg_capital > RETURN_BASE_THRESHOLD:
+            actual_ytd_return = comprehensive_income / avg_capital
+        actual_annualized_return = actual_ytd_return * annualization_factor if np.isfinite(actual_ytd_return) else np.nan
+        target_low = float(plan_row["target_return_low"])
+        target_high = float(plan_row["target_return_high"])
+        if not np.isfinite(actual_annualized_return):
+            status = "无数据"
+            status_color_group = "无数据"
+            deviation = np.nan
+        elif actual_annualized_return < target_low:
+            status = "低于目标"
+            status_color_group = "低于目标"
+            deviation = actual_annualized_return - target_low
+        elif actual_annualized_return > target_high:
+            status = "高于目标"
+            status_color_group = "高于目标"
+            deviation = actual_annualized_return - target_high
+        else:
+            status = "达标"
+            status_color_group = "达标"
+            deviation = 0.0
+
+        rows.append(
+            {
+                "plan_asset": str(plan_row["plan_asset"]),
+                "display_order": int(plan_row["display_order"]),
+                "plan_balance": float(plan_row["plan_balance"]) if pd.notna(plan_row["plan_balance"]) else np.nan,
+                "target_return_mid": float(plan_row["target_return_mid"]) if pd.notna(plan_row["target_return_mid"]) else np.nan,
+                "target_return_low": target_low,
+                "target_return_high": target_high,
+                "target_return_range": f"{target_low:.1%}-{target_high:.1%}",
+                "full_market_value_current": current_market_value,
+                "comprehensive_income_mtd_current": comprehensive_income,
+                "avg_capital_mtd_current": avg_capital,
+                "actual_ytd_comprehensive_return": actual_ytd_return,
+                "actual_annualized_comprehensive_return": actual_annualized_return,
+                "return_completion_status": status,
+                "_status_color_group": status_color_group,
+                "return_deviation": deviation,
+                "mapped_asset_classes": "、".join(mapped_classes),
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values("display_order")
+
+
+def render_asset_return_completion(data: pd.DataFrame, current_month: str) -> None:
+    plan, plan_error = load_asset_return_plan(ASSET_RETURN_PLAN_PATH)
+    if plan_error:
+        st.warning(plan_error)
+        return
+
+    completion = asset_return_completion_summary(data, current_month, plan)
+    if completion.empty:
+        st.info("当前暂无可展示的资产收益完成情况。")
+        return
+
+    st.markdown("#### 资产收益完成情况")
+    show_block_note(
+        "本模块只展示计划表中的6个资产项；浅条为年初计划收益率区间，细线为目标中枢，"
+        "圆点为当前年初以来综合收益率按报告月份数年化后的结果。"
+    )
+
+    asset_order = completion["plan_asset"].tolist()
+    tooltip = [
+        alt.Tooltip("plan_asset:N", title="计划资产项"),
+        alt.Tooltip("actual_ytd_comprehensive_return:Q", title="当前YTD综合收益率", format=".2%"),
+        alt.Tooltip("actual_annualized_comprehensive_return:Q", title="当前年化综合收益率", format=".2%"),
+        alt.Tooltip("target_return_mid:Q", title="计划收益率中枢", format=".2%"),
+        alt.Tooltip("target_return_low:Q", title="计划收益率下限", format=".2%"),
+        alt.Tooltip("target_return_high:Q", title="计划收益率上限", format=".2%"),
+        alt.Tooltip("return_completion_status:N", title="是否达标"),
+        alt.Tooltip("return_deviation:Q", title="偏离幅度", format=".2%"),
+        alt.Tooltip("comprehensive_income_mtd_current:Q", title="年初以来综合收益(亿)", format=",.2f"),
+        alt.Tooltip("avg_capital_mtd_current:Q", title="年初以来平均资金占用(亿)", format=",.2f"),
+        alt.Tooltip("full_market_value_current:Q", title="当前市值(亿)", format=",.2f"),
+        alt.Tooltip("plan_balance:Q", title="计划余额(亿)", format=",.2f"),
+        alt.Tooltip("mapped_asset_classes:N", title="映射投资品种"),
+    ]
+    target_ranges = (
+        alt.Chart(completion)
+        .mark_bar(size=16, color="#DCDACD", cornerRadius=4)
+        .encode(
+            x=alt.X("target_return_low:Q", title="收益率", axis=alt.Axis(format=".1%")),
+            x2=alt.X2("target_return_high:Q"),
+            y=alt.Y("plan_asset:N", title=None, sort=asset_order, axis=alt.Axis(labelLimit=180)),
+            tooltip=tooltip,
+        )
+    )
+    target_mid = (
+        alt.Chart(completion)
+        .mark_tick(thickness=2.5, size=28, color="#475569")
+        .encode(
+            x=alt.X("target_return_mid:Q"),
+            y=alt.Y("plan_asset:N", sort=asset_order),
+            tooltip=tooltip,
+        )
+    )
+    point_data = completion.dropna(subset=["actual_annualized_comprehensive_return"]).copy()
+    actual_points = (
+        alt.Chart(point_data)
+        .mark_point(filled=True, size=95, stroke="#FFFFFF", strokeWidth=1.4)
+        .encode(
+            x=alt.X("actual_annualized_comprehensive_return:Q"),
+            y=alt.Y("plan_asset:N", sort=asset_order),
+            color=alt.Color(
+                "_status_color_group:N",
+                title=None,
+                scale=alt.Scale(
+                    domain=["达标", "低于目标", "高于目标", "无数据"],
+                    range=[POSITIVE_COLOR, NEGATIVE_COLOR, "#C88439", NEUTRAL_COLOR],
+                ),
+                legend=alt.Legend(orient="top"),
+            ),
+            tooltip=tooltip,
+        )
+    )
+    actual_labels = (
+        alt.Chart(point_data)
+        .mark_text(align="left", dx=8, color="#475569", fontSize=11)
+        .encode(
+            x=alt.X("actual_annualized_comprehensive_return:Q"),
+            y=alt.Y("plan_asset:N", sort=asset_order),
+            text=alt.Text("actual_annualized_comprehensive_return:Q", format=".2%"),
+        )
+    )
+    chart = (
+        (target_ranges + target_mid + actual_points + actual_labels)
+        .properties(title="计划资产项综合收益率完成情况", height=max(280, len(asset_order) * 42 + 80))
+        .configure_view(strokeWidth=0)
+        .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+    )
+    st.altair_chart(chart, width="stretch")
+
+    st.dataframe(
+        format_table(
+            completion[
+                [
+                    "plan_asset",
+                    "full_market_value_current",
+                    "plan_balance",
+                    "actual_ytd_comprehensive_return",
+                    "actual_annualized_comprehensive_return",
+                    "target_return_range",
+                    "return_completion_status",
+                    "return_deviation",
+                    "mapped_asset_classes",
+                ]
+            ],
+            comparison_mode="年初以来",
+        ),
+        width="stretch",
+        hide_index=True,
+    )
 
 
 def account_duration_summary(data: pd.DataFrame, current_month: str) -> pd.DataFrame:
@@ -1787,6 +2035,7 @@ def main() -> None:
             empty_message="当前投资品种暂无可展示的规模变化。",
             label_order=asset_chart_labels,
         )
+    render_asset_return_completion(data, current_month)
     st.dataframe(
         format_table(
             asset_class_display[
@@ -1824,7 +2073,7 @@ def main() -> None:
             account_summary,
             "comprehensive_return_mtd",
             "account_bucket",
-            "账户综合收益率排行",
+            "账户综合收益率",
             display_names_for_mode(comparison_mode)["comprehensive_return_mtd"],
             limit=12,
             selection="abs",
@@ -1841,7 +2090,7 @@ def main() -> None:
             account_summary,
             "finance_return_mtd",
             "account_bucket",
-            "账户财务收益率排行",
+            "账户财务收益率",
             display_names_for_mode(comparison_mode)["finance_return_mtd"],
             limit=12,
             selection="abs",
@@ -1849,15 +2098,15 @@ def main() -> None:
             empty_message="当前账户暂无可展示的财务收益率。",
             label_order=account_chart_labels,
             threshold_lines=[
-                {"label": "保证成本率 3.24%", "value": GUARANTEE_COST_RATE, "color": "#7D5BA6"},
                 {"label": "有效成本率 3.26%", "value": EFFECTIVE_COST_RATE, "color": "#0F6F3F"},
             ],
             threshold_color_value=EFFECTIVE_COST_RATE,
         )
     st.caption(
-        "比较说明：综合收益率 vs 资金成本率看监管 ALM 缺口；"
-        "风险调整收益率 vs 保证成本率看最低承诺覆盖能力；"
-        "会计收益率 vs 有效成本率看 IFRS17 账户利润压力。"
+        "比较说明：以下三项为公司整体成本率，并非按账户拆分后的成本率。"
+        "综合收益率 vs 资金成本率 3.41% 看监管 ALM 缺口；"
+        "风险调整收益率 vs 保证成本率 3.24% 看最低承诺覆盖能力；"
+        "会计收益率 vs 有效成本率 3.26% 看 IFRS17 账户利润压力。"
     )
     st.dataframe(
         format_table(
