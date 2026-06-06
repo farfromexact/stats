@@ -26,6 +26,9 @@ POSITIVE_COLOR = "#122256"
 NEGATIVE_COLOR = "#8B2F2F"
 NEUTRAL_COLOR = "#8EA0B6"
 FUNDING_COLOR = "#6F7F92"
+FUNDING_COST_RATE = 0.0341
+GUARANTEE_COST_RATE = 0.0324
+EFFECTIVE_COST_RATE = 0.0326
 ACCOUNT_ORDER_PREFIX = [
     "传统",
     "自有",
@@ -926,6 +929,8 @@ def render_bar_chart(
     comparison_mode: str = "单月复盘",
     empty_message: str = "暂无可展示的图表数据。",
     label_order: list[str] | None = None,
+    threshold_lines: list[dict[str, object]] | None = None,
+    threshold_color_value: float | None = None,
 ) -> None:
     normalized_label_order = [str(label) for label in label_order or []]
     if normalized_label_order:
@@ -966,6 +971,38 @@ def render_bar_chart(
         ],
         default="负向",
     )
+    color_domain = ["正向", "负向", "回购/融资"]
+    color_range = [POSITIVE_COLOR, NEGATIVE_COLOR, FUNDING_COLOR]
+    if threshold_color_value is not None:
+        threshold = float(threshold_color_value)
+        chart_data["_cost_rate_note"] = np.select(
+            [
+                chart_data["_is_funding_asset_class"],
+                chart_data["_value"] < 0,
+                chart_data["_value"] >= threshold,
+            ],
+            [
+                "回购/融资科目",
+                "低于成本率",
+                "达到或超过成本率",
+            ],
+            default="低于成本率",
+        )
+        chart_data["_bar_color_group"] = np.select(
+            [
+                chart_data["_is_funding_asset_class"],
+                chart_data["_value"] < 0,
+                chart_data["_value"] >= threshold,
+            ],
+            [
+                "回购/融资",
+                "负向",
+                "超过成本率",
+            ],
+            default="未超过成本率",
+        )
+        color_domain = ["超过成本率", "未超过成本率", "负向", "回购/融资"]
+        color_range = [POSITIVE_COLOR, NEUTRAL_COLOR, NEGATIVE_COLOR, FUNDING_COLOR]
     if normalized_label_order:
         chart_data = chart_data.sort_values("_forced_order")
     else:
@@ -978,6 +1015,8 @@ def render_bar_chart(
     ]
     if label_col == "asset_class":
         tooltips.append(alt.Tooltip("_color_note:N", title="颜色口径"))
+    if threshold_color_value is not None and "_cost_rate_note" in chart_data.columns:
+        tooltips.append(alt.Tooltip("_cost_rate_note:N", title="成本率判断"))
     for column in [
         "finance_income_mtd_current",
         "comprehensive_income_mtd_current",
@@ -1018,8 +1057,8 @@ def render_bar_chart(
                 "_bar_color_group:N",
                 title=None,
                 scale=alt.Scale(
-                    domain=["正向", "负向", "回购/融资"],
-                    range=[POSITIVE_COLOR, NEGATIVE_COLOR, FUNDING_COLOR],
+                    domain=color_domain,
+                    range=color_range,
                 ),
                 legend=None,
             ),
@@ -1027,8 +1066,42 @@ def render_bar_chart(
         )
     )
     zero_rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#475569", opacity=0.55).encode(x="x:Q")
+    chart_layers = bars + zero_rule
+    if threshold_lines:
+        threshold_frame = pd.DataFrame(threshold_lines).copy()
+        if not threshold_frame.empty and "value" in threshold_frame.columns:
+            threshold_frame["value"] = pd.to_numeric(threshold_frame["value"], errors="coerce")
+            threshold_frame = threshold_frame.dropna(subset=["value"])
+            if not threshold_frame.empty:
+                if "label" not in threshold_frame.columns:
+                    threshold_frame["label"] = threshold_frame["value"].map(lambda value: f"{value:.2%}")
+                if "color" not in threshold_frame.columns:
+                    threshold_frame["color"] = "#C88439"
+                threshold_frame["label"] = threshold_frame["label"].astype(str)
+                threshold_frame["color"] = threshold_frame["color"].astype(str)
+                threshold_rules = (
+                    alt.Chart(threshold_frame)
+                    .mark_rule(strokeWidth=2.2, strokeDash=[5, 3])
+                    .encode(
+                        x=alt.X("value:Q"),
+                        color=alt.Color(
+                            "label:N",
+                            title=None,
+                            scale=alt.Scale(
+                                domain=threshold_frame["label"].tolist(),
+                                range=threshold_frame["color"].tolist(),
+                            ),
+                            legend=alt.Legend(orient="top", symbolType="stroke"),
+                        ),
+                        tooltip=[
+                            alt.Tooltip("label:N", title="成本率"),
+                            alt.Tooltip("value:Q", title="成本率", format=".2%"),
+                        ],
+                    )
+                )
+                chart_layers = chart_layers + threshold_rules
     chart = (
-        (bars + zero_rule)
+        chart_layers
         .properties(title=title, height=_bar_height(len(chart_data)))
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
@@ -1758,6 +1831,10 @@ def main() -> None:
             comparison_mode=comparison_mode,
             empty_message="当前账户暂无可展示的综合收益率。",
             label_order=account_chart_labels,
+            threshold_lines=[
+                {"label": "资金成本率 3.41%", "value": FUNDING_COST_RATE, "color": "#C88439"},
+            ],
+            threshold_color_value=FUNDING_COST_RATE,
         )
     with account_chart_cols[1]:
         render_bar_chart(
@@ -1771,7 +1848,17 @@ def main() -> None:
             comparison_mode=comparison_mode,
             empty_message="当前账户暂无可展示的财务收益率。",
             label_order=account_chart_labels,
+            threshold_lines=[
+                {"label": "保证成本率 3.24%", "value": GUARANTEE_COST_RATE, "color": "#7D5BA6"},
+                {"label": "有效成本率 3.26%", "value": EFFECTIVE_COST_RATE, "color": "#0F6F3F"},
+            ],
+            threshold_color_value=EFFECTIVE_COST_RATE,
         )
+    st.caption(
+        "比较说明：综合收益率 vs 资金成本率看监管 ALM 缺口；"
+        "风险调整收益率 vs 保证成本率看最低承诺覆盖能力；"
+        "会计收益率 vs 有效成本率看 IFRS17 账户利润压力。"
+    )
     st.dataframe(
         format_table(
             account_display[
