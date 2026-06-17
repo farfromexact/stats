@@ -2462,13 +2462,15 @@ def main() -> None:
     ]
     if manager_view_mode == "拆分账户":
         manager_display_columns = ["account_bucket"] + manager_display_columns
+    manager_table = manager_display[manager_display_columns].reset_index(drop=True)
     st.dataframe(
         format_table(
-            manager_display[manager_display_columns],
+            manager_table,
             comparison_mode=comparison_mode,
         ),
         width="stretch",
         hide_index=True,
+        key=f"manager-breakdown-table-{manager_view_mode}",
     )
 
     section_anchor("asset-evidence")
