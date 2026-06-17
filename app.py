@@ -226,6 +226,16 @@ def apply_yacht_theme() -> None:
             font-weight: 700;
         }
 
+        .kpi-delta.kpi-delta-positive {
+            color: var(--yacht-navy);
+            background: rgba(142, 160, 182, 0.18);
+        }
+
+        .kpi-delta.kpi-delta-negative {
+            color: #8B2F2F;
+            background: rgba(139, 47, 47, 0.12);
+        }
+
         .decision-summary {
             margin: 0.35rem 0 0.6rem 0;
             color: var(--yacht-ink);
@@ -693,7 +703,15 @@ def render_kpi_grid(items: list[dict[str, str]]) -> None:
         delta = item.get("delta", "")
         tone = item.get("tone", "")
         tone_class = "kpi-card-internal" if tone == "internal" else "kpi-card-external" if tone == "external" else ""
-        delta_html = f'<div class="kpi-delta">{html_text(delta)}</div>' if delta else ""
+        delta_tone = item.get("delta_tone", "")
+        delta_tone_class = (
+            " kpi-delta-positive"
+            if delta_tone == "positive"
+            else " kpi-delta-negative"
+            if delta_tone == "negative"
+            else ""
+        )
+        delta_html = f'<div class="kpi-delta{delta_tone_class}">{html_text(delta)}</div>' if delta else ""
         cards.append(
             '<div class="kpi-card {tone_class}"><div class="kpi-label">{label}</div>'
             '<div class="kpi-value">{value}</div>{delta}</div>'.format(
@@ -1193,8 +1211,23 @@ def render_bar_chart(
     if show_value_labels and not chart_data.empty:
         min_value = float(chart_data["_value"].min())
         max_value = float(chart_data["_value"].max())
-        if min_value >= 0 and max_value > 0:
-            x_encoding["scale"] = alt.Scale(domain=[0, max_value * 1.16])
+        domain_values = [min_value, max_value, 0.0]
+        if threshold_lines:
+            for threshold_line in threshold_lines:
+                try:
+                    domain_values.append(float(threshold_line.get("value", 0.0)))
+                except (TypeError, ValueError):
+                    continue
+        min_domain = min(domain_values)
+        max_domain = max(domain_values)
+        span = max(max_domain - min_domain, max(abs(min_domain), abs(max_domain), 1.0) * 0.1)
+        padding = span * 0.08
+        if min_domain >= 0:
+            x_encoding["scale"] = alt.Scale(domain=[0, max_domain + padding])
+        elif max_domain <= 0:
+            x_encoding["scale"] = alt.Scale(domain=[min_domain - padding, 0])
+        else:
+            x_encoding["scale"] = alt.Scale(domain=[min_domain - padding, max_domain + padding])
 
     y_encoding = alt.Y(
         "_label:N",
@@ -1223,17 +1256,6 @@ def render_bar_chart(
     )
     zero_rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#475569", opacity=0.55).encode(x="x:Q")
     chart_layers = bars + zero_rule
-    if show_value_labels:
-        value_labels = (
-            alt.Chart(chart_data)
-            .mark_text(align="left", baseline="middle", dx=5, color="#475569", fontSize=11)
-            .encode(
-                x=alt.X("_value:Q", **x_encoding),
-                y=y_encoding,
-                text=alt.Text("_value_label:N"),
-            )
-        )
-        chart_layers = chart_layers + value_labels
     if threshold_lines:
         threshold_frame = pd.DataFrame(threshold_lines).copy()
         if not threshold_frame.empty and "value" in threshold_frame.columns:
@@ -1248,7 +1270,7 @@ def render_bar_chart(
                 threshold_frame["color"] = threshold_frame["color"].astype(str)
                 threshold_rules = (
                     alt.Chart(threshold_frame)
-                    .mark_rule(strokeWidth=2.2, strokeDash=[5, 3])
+                    .mark_rule(strokeWidth=1.1, strokeDash=[1, 8], opacity=0.32)
                     .encode(
                         x=alt.X("value:Q"),
                         color=alt.Color(
@@ -1266,7 +1288,63 @@ def render_bar_chart(
                         ],
                     )
                 )
-                chart_layers = chart_layers + threshold_rules
+                threshold_arrows = (
+                    alt.Chart(threshold_frame)
+                    .mark_text(
+                        text="▼",
+                        align="center",
+                        baseline="bottom",
+                        dy=-1,
+                        color=POSITIVE_COLOR,
+                        fontSize=15,
+                        fontWeight=700,
+                    )
+                    .encode(
+                        x=alt.X("value:Q"),
+                        y=alt.value(4),
+                        tooltip=[
+                            alt.Tooltip("label:N", title="成本率"),
+                            alt.Tooltip("value:Q", title="成本率", format=".2%"),
+                        ],
+                    )
+                )
+                chart_layers = chart_layers + threshold_rules + threshold_arrows
+    if show_value_labels:
+        positive_label_data = chart_data[chart_data["_value"] >= 0].copy()
+        negative_label_data = chart_data[chart_data["_value"] < 0].copy()
+        positive_value_labels = (
+            alt.Chart(positive_label_data)
+            .mark_text(
+                align="left",
+                baseline="middle",
+                dx=7,
+                color="#0D0707",
+                fontSize=12,
+                fontWeight=600,
+            )
+            .encode(
+                x=alt.X("_value:Q", **x_encoding),
+                y=y_encoding,
+                text=alt.Text("_value_label:N"),
+            )
+        )
+        negative_value_labels = (
+            alt.Chart(negative_label_data)
+            .mark_text(
+                align="right",
+                baseline="middle",
+                dx=-7,
+                color="#0D0707",
+                fontSize=12,
+                fontWeight=600,
+            )
+            .encode(
+                x=alt.X("_value:Q", **x_encoding),
+                y=y_encoding,
+                text=alt.Text("_value_label:N"),
+            )
+        )
+        chart_layers = chart_layers + positive_value_labels + negative_value_labels
     chart = (
         chart_layers
         .properties(title=title, height=_bar_height(len(chart_data)))
@@ -1657,7 +1735,8 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
             {
                 "label": str(row["strategy_book_display_label"]),
                 "value": amount(float(row["full_market_value_current"])),
-                "delta": f"综合收益率{pct(float(row['comprehensive_return_mtd']))}",
+                "delta": pct(float(row["comprehensive_return_mtd"])),
+                "delta_tone": "positive" if float(row["comprehensive_return_mtd"]) >= 0 else "negative",
                 "tone": "internal" if row["strategy_book_scope"] == "委内" else "external",
             }
             for _, row in summary.iterrows()
@@ -1867,6 +1946,8 @@ def render_duration_chart(duration_summary: pd.DataFrame, comparison_mode: str) 
 
     account_order = ordered_account_labels(chart_data["account_bucket"].tolist())
     chart_data["account_bucket"] = chart_data["account_bucket"].astype(str)
+    chart_data["_duration_label"] = chart_data["weighted_duration"].map(lambda value: f"{value:,.2f}")
+    max_duration = max(float(chart_data["weighted_duration"].max()), 1.0)
     tooltips = [
         alt.Tooltip("account_bucket:N", title="账户"),
         alt.Tooltip("weighted_duration:Q", title="账户加权久期", format=",.2f"),
@@ -1879,24 +1960,38 @@ def render_duration_chart(duration_summary: pd.DataFrame, comparison_mode: str) 
         ),
         alt.Tooltip("duration_asset_count:Q", title="纳入久期资产数", format=",.0f"),
     ]
-    chart = (
+    x_duration = alt.X(
+        "weighted_duration:Q",
+        title="账户加权久期",
+        axis=alt.Axis(format=",.1f"),
+        scale=alt.Scale(domain=[0, max_duration * 1.08]),
+    )
+    y_duration = alt.Y(
+        "account_bucket:N",
+        title=None,
+        sort=account_order,
+        axis=alt.Axis(labelLimit=180),
+    )
+    bars = (
         alt.Chart(chart_data)
         .mark_bar(color=POSITIVE_COLOR, cornerRadiusEnd=2)
         .encode(
-            x=alt.X(
-                "weighted_duration:Q",
-                title="账户加权久期",
-                axis=alt.Axis(format=",.1f"),
-                scale=alt.Scale(zero=True),
-            ),
-            y=alt.Y(
-                "account_bucket:N",
-                title=None,
-                sort=account_order,
-                axis=alt.Axis(labelLimit=180),
-            ),
+            x=x_duration,
+            y=y_duration,
             tooltip=tooltips,
         )
+    )
+    value_labels = (
+        alt.Chart(chart_data)
+        .mark_text(align="left", baseline="middle", dx=5, color="#475569", fontSize=11)
+        .encode(
+            x=x_duration,
+            y=y_duration,
+            text=alt.Text("_duration_label:N"),
+        )
+    )
+    chart = (
+        (bars + value_labels)
         .properties(title="账户加权久期", height=_bar_height(len(chart_data)))
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
@@ -2484,6 +2579,7 @@ def main() -> None:
             comparison_mode=comparison_mode,
             empty_message="当前投资品种暂无可展示的收益贡献。",
             label_order=asset_chart_labels,
+            show_value_labels=True,
         )
     with asset_chart_cols[1]:
         render_bar_chart(
@@ -2495,6 +2591,7 @@ def main() -> None:
             comparison_mode=comparison_mode,
             empty_message="当前投资品种暂无可展示的规模变化。",
             label_order=asset_chart_labels,
+            show_value_labels=True,
         )
     st.dataframe(
         format_table(
@@ -2529,7 +2626,8 @@ def main() -> None:
         "本模块复刻管理透视表口径：委内展示委托资管下的固收配置盘、固收交易盘、非标、权益配置盘、权益交易盘；"
         "委外并列展示人保/泰康固收、富国/华泰权益，以及太平资产香港、太保投资香港、国寿富兰克林。"
         "指定委外账户按账户全量纳入，包含现金、应收、费用等调节项；"
-        "富国顶层产品行只作为对账提示，避免重复计算底层持仓。"
+        "富国顶层产品行只作为对账提示，避免重复计算底层持仓；"
+        "卡片胶囊数字为综合收益率。"
     )
     render_strategy_book_overview(data, current_month, comparison_mode)
 
@@ -2560,6 +2658,7 @@ def main() -> None:
                 {"label": "资金成本率 3.41%", "value": FUNDING_COST_RATE, "color": "#C88439"},
             ],
             threshold_color_value=FUNDING_COST_RATE,
+            show_value_labels=True,
         )
     with account_chart_cols[1]:
         render_bar_chart(
@@ -2577,6 +2676,7 @@ def main() -> None:
                 {"label": "有效成本率 3.26%", "value": EFFECTIVE_COST_RATE, "color": "#0F6F3F"},
             ],
             threshold_color_value=EFFECTIVE_COST_RATE,
+            show_value_labels=True,
         )
     st.caption(
         "比较说明：以下三项为公司整体成本率，并非按账户拆分后的成本率。"
