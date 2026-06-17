@@ -183,6 +183,18 @@ def apply_yacht_theme() -> None:
             box-shadow: 0 2px 10px rgba(13, 7, 7, 0.05);
         }
 
+        .kpi-card.kpi-card-internal {
+            background: linear-gradient(180deg, rgba(248, 251, 255, 0.96) 0%, rgba(241, 246, 251, 0.9) 100%);
+            border-color: #D2DCE7;
+            border-left-color: var(--yacht-blue);
+        }
+
+        .kpi-card.kpi-card-external {
+            background: linear-gradient(180deg, rgba(255, 253, 247, 0.96) 0%, rgba(249, 245, 235, 0.92) 100%);
+            border-color: #E1D5BD;
+            border-left-color: #C4A35F;
+        }
+
         .kpi-label {
             color: var(--yacht-navy);
             font-size: 0.84rem;
@@ -673,10 +685,13 @@ def render_kpi_grid(items: list[dict[str, str]]) -> None:
     cards = []
     for item in items:
         delta = item.get("delta", "")
+        tone = item.get("tone", "")
+        tone_class = "kpi-card-internal" if tone == "internal" else "kpi-card-external" if tone == "external" else ""
         delta_html = f'<div class="kpi-delta">{html_text(delta)}</div>' if delta else ""
         cards.append(
-            '<div class="kpi-card"><div class="kpi-label">{label}</div>'
+            '<div class="kpi-card {tone_class}"><div class="kpi-label">{label}</div>'
             '<div class="kpi-value">{value}</div>{delta}</div>'.format(
+                tone_class=tone_class,
                 label=html_text(item["label"]),
                 value=html_text(item["value"]),
                 delta=delta_html,
@@ -1582,6 +1597,7 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
                 "label": str(row["strategy_book_display_label"]),
                 "value": amount(float(row["full_market_value_current"])),
                 "delta": f"综合收益率 {pct(float(row['comprehensive_return_mtd']))}",
+                "tone": "internal" if row["strategy_book_scope"] == "委内" else "external",
             }
             for _, row in summary.iterrows()
         ]
