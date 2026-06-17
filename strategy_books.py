@@ -20,6 +20,9 @@ EXTERNAL_STRATEGY_BOOK_ORDER = [
     "泰康固收",
     "富国权益",
     "华泰权益",
+    "太平资产香港",
+    "太保投资香港",
+    "国寿富兰克林",
 ]
 STRATEGY_BOOK_ORDER = INTERNAL_STRATEGY_BOOK_ORDER + EXTERNAL_STRATEGY_BOOK_ORDER
 STRATEGY_BOOK_SCOPE = {
@@ -72,7 +75,16 @@ OUTSOURCED_FIXED_CLASSES = {
     "持有型不动产ABS",
     "公募REITS",
 }
-OUTSOURCED_EQUITY_ACCOUNT_MANDATES = {"委托华泰"}
+OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS = {
+    "委托华泰": "华泰权益",
+    "委托太平资产香港": "太平资产香港",
+    "委托太保投资香港": "太保投资香港",
+    "委托国寿富兰克林": "国寿富兰克林",
+}
+OUTSOURCED_FULL_ACCOUNT_BOOKS = {
+    "富国权益",
+    *OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS.values(),
+}
 CASH_LIQUIDITY_CLASSES = {
     "活期存款",
     "买入返售",
@@ -161,8 +173,8 @@ def classify_strategy_book(row: pd.Series | dict) -> str:
         return "泰康固收"
     if "富国" in fund_book_name:
         return "富国权益"
-    if mandate_type in OUTSOURCED_EQUITY_ACCOUNT_MANDATES:
-        return "华泰权益"
+    if mandate_type in OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS:
+        return OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS[mandate_type]
 
     return EXCLUDED_STRATEGY_BOOK
 
@@ -199,9 +211,9 @@ def strategy_book_section(row: pd.Series | dict) -> str:
         }:
             return "基金"
 
-    if strategy_book in {"权益-配置盘", "权益-交易盘", "富国权益", "华泰权益"}:
+    if strategy_book in {"权益-配置盘", "权益-交易盘"} | OUTSOURCED_FULL_ACCOUNT_BOOKS:
         if (
-            strategy_book in {"富国权益", "华泰权益"}
+            strategy_book in OUTSOURCED_FULL_ACCOUNT_BOOKS
             and (asset_class in CASH_LIQUIDITY_CLASSES or asset_class_level_1 in {"现金", "回购", "存款"})
         ):
             return "流动性"
@@ -262,7 +274,11 @@ def exclusion_reason(row: pd.Series | dict) -> str:
         return "流动性、现金、回购、应收或费用科目"
     if asset_major_class in {"", "-", "未填报", "缺省"} or trade_strategy in {"", "-", "未填报", "缺省"}:
         return "源表缺少资产大类或交易策略"
-    if mandate_type not in {INTERNAL_MANDATE, "委托人保", "委托泰康", "委托华泰"} and "富国" not in fund_book_name:
+    if (
+        mandate_type not in {INTERNAL_MANDATE, "委托人保", "委托泰康"}
+        and mandate_type not in OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS
+        and "富国" not in fund_book_name
+    ):
         return "非委内/指定委外账户"
     return "不符合 rat race 分类规则"
 

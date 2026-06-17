@@ -1595,7 +1595,7 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
             "strategy_book_display_label",
             "rat race分类市值",
             display_names_for_mode(comparison_mode)["full_market_value_current"],
-            limit=9,
+            limit=len(STRATEGY_BOOK_LABEL_ORDER),
             label_order=STRATEGY_BOOK_LABEL_ORDER,
             comparison_mode=comparison_mode,
             empty_message="当前 rat race 分类暂无可展示的市值。",
@@ -1608,7 +1608,7 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
             "strategy_book_display_label",
             "rat race分类综合收益率",
             display_names_for_mode(comparison_mode)["comprehensive_return_mtd"],
-            limit=9,
+            limit=len(STRATEGY_BOOK_LABEL_ORDER),
             label_order=STRATEGY_BOOK_LABEL_ORDER,
             comparison_mode=comparison_mode,
             empty_message="当前 rat race 分类暂无可展示的收益率。",
@@ -1627,7 +1627,7 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
                 "strategy_book_display_label",
                 "委外账户市值（放大）",
                 display_names_for_mode(comparison_mode)["full_market_value_current"],
-                limit=4,
+                limit=len(external_label_order),
                 label_order=external_label_order,
                 comparison_mode=comparison_mode,
                 empty_message="当前委外账户暂无可展示的市值。",
@@ -1640,7 +1640,7 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
                 "strategy_book_display_label",
                 "委外账户综合收益额（放大）",
                 display_names_for_mode(comparison_mode)["comprehensive_income_mtd_current"],
-                limit=4,
+                limit=len(external_label_order),
                 label_order=external_label_order,
                 comparison_mode=comparison_mode,
                 empty_message="当前委外账户暂无可展示的收益额。",
@@ -2446,7 +2446,8 @@ def main() -> None:
     st.subheader("rat race")
     show_block_note(
         "本模块复刻管理透视表口径：委内展示委托资管下的固收配置盘、固收交易盘、非标、权益配置盘、权益交易盘；"
-        "委外并列展示人保/泰康固收与富国/华泰权益。富国/华泰权益按账户全量纳入，包含现金、应收、费用等调节项；"
+        "委外并列展示人保/泰康固收、富国/华泰权益，以及太平资产香港、太保投资香港、国寿富兰克林。"
+        "指定委外账户按账户全量纳入，包含现金、应收、费用等调节项；"
         "富国顶层产品行只作为对账提示，避免重复计算底层持仓。"
     )
     render_strategy_book_overview(data, current_month, comparison_mode)

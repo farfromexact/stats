@@ -136,6 +136,18 @@ class StrategyBookClassificationTest(unittest.TestCase):
             "华泰权益",
         )
         self.assertEqual(
+            classify_strategy_book(row(mandate_type="委托太平资产香港", asset_class="其他（应收）")),
+            "太平资产香港",
+        )
+        self.assertEqual(
+            classify_strategy_book(row(mandate_type="委托太保投资香港", asset_class="股权基金")),
+            "太保投资香港",
+        )
+        self.assertEqual(
+            classify_strategy_book(row(mandate_type="委托国寿富兰克林", asset_class="货币类基金")),
+            "国寿富兰克林",
+        )
+        self.assertEqual(
             classify_strategy_book(row(mandate_type="委托人保", asset_class="正回购")),
             EXCLUDED_STRATEGY_BOOK,
         )
@@ -177,6 +189,9 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
             "泰康固收": 44.725977,
             "富国权益": 5.304112,
             "华泰权益": 5.279801,
+            "太平资产香港": 4.358990,
+            "太保投资香港": 6.805692,
+            "国寿富兰克林": 8.348263,
         }
         for label, value in expected.items():
             self.assertAlmostEqual(actual[label], value, places=2)
