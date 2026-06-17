@@ -155,11 +155,11 @@ class StrategyBookClassificationTest(unittest.TestCase):
     def test_exclusion_reason_marks_private_equity_real_estate(self):
         self.assertEqual(
             exclusion_reason(row(mandate_type="直投", asset_class="不动产基金")),
-            "股权/不动产直投，未纳入 rat race 核心分类",
+            "股权/不动产直投，未纳入委内/委外比较核心分类",
         )
         self.assertEqual(
             exclusion_reason(row(mandate_type="直投", asset_class="股权基金")),
-            "股权/不动产直投，未纳入 rat race 核心分类",
+            "股权/不动产直投，未纳入委内/委外比较核心分类",
         )
         self.assertEqual(
             exclusion_reason(

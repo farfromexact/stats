@@ -269,7 +269,7 @@ def exclusion_reason(row: pd.Series | dict) -> str:
         or "股权" in asset_class_level_2
         or "不动产" in asset_class_level_2
     ):
-        return "股权/不动产直投，未纳入 rat race 核心分类"
+        return "股权/不动产直投，未纳入委内/委外比较核心分类"
     if asset_class in CASH_LIQUIDITY_CLASSES or asset_class_level_1 in {"现金", "回购", "存款"}:
         return "流动性、现金、回购、应收或费用科目"
     if asset_major_class in {"", "-", "未填报", "缺省"} or trade_strategy in {"", "-", "未填报", "缺省"}:
@@ -280,7 +280,7 @@ def exclusion_reason(row: pd.Series | dict) -> str:
         and "富国" not in fund_book_name
     ):
         return "非委内/指定委外账户"
-    return "不符合 rat race 分类规则"
+    return "不符合委内/委外比较分类规则"
 
 
 def assign_strategy_book_columns(data: pd.DataFrame) -> pd.DataFrame:

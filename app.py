@@ -472,7 +472,7 @@ DISPLAY_NAMES = {
     "mapped_asset_classes": "映射投资品种",
     "strategy_book_scope": "委内/委外",
     "strategy_book": "配置/交易分类",
-    "strategy_book_display_label": "rat race分类",
+    "strategy_book_display_label": "委内/委外分类",
     "strategy_book_section": "二级展示",
     "strategy_book_item": "明细展示",
     "strategy_book_exclusion_reason": "未纳入原因",
@@ -838,7 +838,7 @@ def sidebar_nav() -> None:
         <a class="sidebar-nav-button" href="#overview">总体表现</a>
         <a class="sidebar-nav-button" href="#charts-overview">图表总览</a>
         <a class="sidebar-nav-button" href="#asset-class-overview">投资品种图表/表格</a>
-        <a class="sidebar-nav-button" href="#strategy-book-overview">rat race</a>
+        <a class="sidebar-nav-button" href="#strategy-book-overview">委内/委外比较</a>
         <a class="sidebar-nav-button" href="#account-overview">账户层图表/表格</a>
         <a class="sidebar-nav-button" href="#duration-overview">账户久期</a>
         <a class="sidebar-nav-button" href="#account-class-breakdown">账户内品种拆解</a>
@@ -1588,7 +1588,7 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
     detail = strategy_book_detail_summary(data, current_month, comparison_mode)
 
     if summary.empty or summary["record_count_current"].sum() == 0:
-        st.info("当前没有可展示的 rat race 数据。")
+        st.info("当前没有可展示的委内/委外比较数据。")
         return
 
     render_kpi_grid(
@@ -1609,12 +1609,12 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
             summary,
             "full_market_value_current",
             "strategy_book_display_label",
-            "rat race分类市值",
+            "委内/委外分类市值",
             display_names_for_mode(comparison_mode)["full_market_value_current"],
             limit=len(STRATEGY_BOOK_LABEL_ORDER),
             label_order=STRATEGY_BOOK_LABEL_ORDER,
             comparison_mode=comparison_mode,
-            empty_message="当前 rat race 分类暂无可展示的市值。",
+            empty_message="当前委内/委外分类暂无可展示的市值。",
             show_value_labels=True,
         )
     with chart_cols[1]:
@@ -1622,12 +1622,12 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
             summary,
             "comprehensive_return_mtd",
             "strategy_book_display_label",
-            "rat race分类综合收益率",
+            "委内/委外分类综合收益率",
             display_names_for_mode(comparison_mode)["comprehensive_return_mtd"],
             limit=len(STRATEGY_BOOK_LABEL_ORDER),
             label_order=STRATEGY_BOOK_LABEL_ORDER,
             comparison_mode=comparison_mode,
-            empty_message="当前 rat race 分类暂无可展示的收益率。",
+            empty_message="当前委内/委外分类暂无可展示的收益率。",
             show_value_labels=True,
         )
 
@@ -1694,7 +1694,7 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
     excluded_market_value = float(pd.to_numeric(excluded["full_market_value_current"], errors="coerce").fillna(0.0).sum())
     excluded_rows = int(pd.to_numeric(excluded["record_count_current"], errors="coerce").fillna(0).sum())
     st.caption(
-        f"未纳入 rat race 净市值 {amount(excluded_market_value)}，共 {excluded_rows:,} 条；"
+        f"未纳入委内/委外比较净市值 {amount(excluded_market_value)}，共 {excluded_rows:,} 条；"
         "主要承接委内流动性、现金、买入返售、应收、费用、长股投、直投股权、不动产，"
         "以及富国顶层产品汇总行等对账项。"
     )
@@ -1713,7 +1713,7 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
             for _, row in reason_totals.sort_values("_abs_market_value", ascending=False).head(4).iterrows()
         )
         st.caption(f"未纳入原因摘要：{reason_text}。")
-    with st.expander("未纳入 rat race 对账明细", expanded=False):
+    with st.expander("未纳入委内/委外比较对账明细", expanded=False):
         st.dataframe(
             format_table(
                 excluded[
@@ -2260,7 +2260,7 @@ def main() -> None:
     if runtime_missing_columns:
         st.warning(
             "源表或部署缓存仍缺少部分运行字段，已临时补空以避免页面中断；"
-            "rat race 等新模块可能无法完整展示。请点击左侧“刷新数据”重新读取源文件。缺失字段："
+            "委内/委外比较等新模块可能无法完整展示。请点击左侧“刷新数据”重新读取源文件。缺失字段："
             + "、".join(runtime_missing_columns)
         )
 
@@ -2459,7 +2459,7 @@ def main() -> None:
     st.divider()
 
     section_anchor("strategy-book-overview")
-    st.subheader("rat race")
+    st.subheader("委内/委外比较")
     show_block_note(
         "本模块复刻管理透视表口径：委内展示委托资管下的固收配置盘、固收交易盘、非标、权益配置盘、权益交易盘；"
         "委外并列展示人保/泰康固收、富国/华泰权益，以及太平资产香港、太保投资香港、国寿富兰克林。"
