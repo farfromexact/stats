@@ -26,7 +26,7 @@ from strategy_books import (
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
-DATA_SCHEMA_VERSION = "2026-06-17-strategy-book-v1"
+DATA_SCHEMA_VERSION = "2026-06-17-strategy-book-v2"
 ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
 CHART_EPSILON = 1e-9
 POSITIVE_COLOR = "#122256"
@@ -524,6 +524,17 @@ COUNT_COLUMNS = {
     "source_rows_prior",
     "duration_asset_count",
 }
+RUNTIME_COLUMN_DEFAULTS = {
+    "market_value_year_open": 0.0,
+    "avg_capital_ytd": 0.0,
+    "finance_income_ytd": 0.0,
+    "comprehensive_income_ytd": 0.0,
+    "asset_major_class": "",
+    "asset_class_level_1": "",
+    "asset_class_level_2": "",
+    "asset_class_level_3": "",
+    "trade_strategy": "",
+}
 
 
 @st.cache_data(show_spinner="正在读取月度宽表...")
@@ -531,25 +542,18 @@ def cached_load(data_dir: str, schema_version: str):
     return load_snapshots(Path(data_dir))
 
 
+def missing_runtime_columns(data: pd.DataFrame) -> list[str]:
+    return [column for column in RUNTIME_COLUMN_DEFAULTS if column not in data.columns]
+
+
 def ensure_runtime_columns(data: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    required_runtime_columns = {
-        "market_value_year_open": 0.0,
-        "avg_capital_ytd": 0.0,
-        "finance_income_ytd": 0.0,
-        "comprehensive_income_ytd": 0.0,
-        "asset_major_class": "",
-        "asset_class_level_1": "",
-        "asset_class_level_2": "",
-        "asset_class_level_3": "",
-        "trade_strategy": "",
-    }
-    missing = [column for column in required_runtime_columns if column not in data.columns]
+    missing = missing_runtime_columns(data)
     if not missing:
         return data, []
 
     data = data.copy()
     for column in missing:
-        data[column] = required_runtime_columns[column]
+        data[column] = RUNTIME_COLUMN_DEFAULTS[column]
     return data, missing
 
 
@@ -2214,6 +2218,11 @@ def main() -> None:
     st.caption("看组合规模、收益贡献、数据质量，并追到资产证据。")
 
     data, validation, errors = cached_load(str(DATA_DIR), DATA_SCHEMA_VERSION)
+    runtime_missing_columns = missing_runtime_columns(data)
+    if runtime_missing_columns and not st.session_state.get("runtime_schema_cache_refresh_attempted"):
+        st.session_state["runtime_schema_cache_refresh_attempted"] = True
+        st.cache_data.clear()
+        st.rerun()
     data, runtime_missing_columns = ensure_runtime_columns(data)
     with st.sidebar:
         st.header("数据与筛选")
@@ -2234,8 +2243,8 @@ def main() -> None:
 
     if runtime_missing_columns:
         st.warning(
-            "当前缓存或源表缺少部分运行字段，已临时补空以避免页面中断；"
-            "请点击左侧“刷新数据”重新读取源文件。缺失字段："
+            "源表或部署缓存仍缺少部分运行字段，已临时补空以避免页面中断；"
+            "rat race 等新模块可能无法完整展示。请点击左侧“刷新数据”重新读取源文件。缺失字段："
             + "、".join(runtime_missing_columns)
         )
 
