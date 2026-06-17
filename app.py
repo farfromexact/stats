@@ -55,6 +55,8 @@ ACCOUNT_ORDER_PREFIX = [
 REPO_FINANCING_ASSET_CLASSES = {"正回购"}
 REVERSE_REPO_ASSET_CLASSES = {"逆回购", "买入返售"}
 FUNDING_ASSET_CLASSES = REPO_FINANCING_ASSET_CLASSES | REVERSE_REPO_ASSET_CLASSES
+EQUITY_THEME_KEYWORDS = ("股权", "长股投")
+REAL_ESTATE_THEME_KEYWORDS = ("不动产",)
 
 st.set_page_config(page_title="组合管理账户复盘", layout="wide")
 
@@ -69,6 +71,8 @@ def apply_yacht_theme() -> None:
             --yacht-blue: #8EA0B6;
             --yacht-foam: #F2F1ED;
             --yacht-deck: #DCDACD;
+            --rat-internal: #2F5AA8;
+            --rat-external: #0F8B7B;
         }
 
         .stApp {
@@ -184,15 +188,15 @@ def apply_yacht_theme() -> None:
         }
 
         .kpi-card.kpi-card-internal {
-            background: linear-gradient(180deg, rgba(248, 251, 255, 0.96) 0%, rgba(241, 246, 251, 0.9) 100%);
-            border-color: #D2DCE7;
-            border-left-color: var(--yacht-blue);
+            background: linear-gradient(180deg, rgba(47, 90, 168, 0.14) 0%, rgba(47, 90, 168, 0.08) 100%);
+            border-color: rgba(47, 90, 168, 0.38);
+            border-left-color: var(--rat-internal);
         }
 
         .kpi-card.kpi-card-external {
-            background: linear-gradient(180deg, rgba(255, 253, 247, 0.96) 0%, rgba(249, 245, 235, 0.92) 100%);
-            border-color: #E1D5BD;
-            border-left-color: #C4A35F;
+            background: linear-gradient(180deg, rgba(15, 139, 123, 0.14) 0%, rgba(15, 139, 123, 0.08) 100%);
+            border-color: rgba(15, 139, 123, 0.36);
+            border-left-color: var(--rat-external);
         }
 
         .kpi-label {
@@ -425,6 +429,8 @@ DISPLAY_NAMES = {
     "asset_class_level_1": "资产分类一级",
     "asset_class_level_2": "资产分类二级",
     "asset_class_level_3": "资产分类三级",
+    "asset_theme": "资产主题",
+    "asset_class_display": "投资品种展示",
     "asset_class": "投资品种",
     "trade_strategy": "交易策略",
     "manager": "投资经理",
@@ -813,6 +819,60 @@ def is_funding_asset_class(value: object) -> bool:
     return str(value).strip() in FUNDING_ASSET_CLASSES
 
 
+def asset_class_theme(value: object) -> str:
+    label = str(value).strip()
+    if any(keyword in label for keyword in REAL_ESTATE_THEME_KEYWORDS):
+        return "不动产"
+    if any(keyword in label for keyword in EQUITY_THEME_KEYWORDS):
+        return "股权"
+    return "常规品种"
+
+
+def enrich_asset_class_display(summary: pd.DataFrame) -> pd.DataFrame:
+    enriched = summary.copy()
+    if "asset_class" not in enriched:
+        enriched["asset_theme"] = pd.Series(dtype=object)
+        enriched["asset_class_display"] = pd.Series(dtype=object)
+        return enriched
+
+    enriched["asset_class"] = enriched["asset_class"].astype(str)
+    enriched["asset_theme"] = enriched["asset_class"].map(asset_class_theme)
+    enriched["asset_class_display"] = np.where(
+        enriched["asset_theme"].isin(["股权", "不动产"]),
+        enriched["asset_theme"] + "-" + enriched["asset_class"],
+        enriched["asset_class"],
+    )
+    return enriched
+
+
+def include_focus_asset_labels(
+    summary: pd.DataFrame,
+    labels: list[str],
+    label_col: str = "asset_class_display",
+    theme_col: str = "asset_theme",
+) -> list[str]:
+    ordered = list(labels)
+    if summary.empty or label_col not in summary or theme_col not in summary:
+        return ordered
+
+    focus = summary[summary[theme_col].isin(["股权", "不动产"])].copy()
+    if focus.empty:
+        return ordered
+
+    focus["_theme_order"] = focus[theme_col].map({"股权": 0, "不动产": 1}).fillna(9)
+    if "full_market_value_current" in focus:
+        focus["_focus_sort_value"] = _numeric_series(focus, "full_market_value_current").abs()
+    else:
+        focus["_focus_sort_value"] = 0.0
+    for label in focus.sort_values(["_theme_order", "_focus_sort_value"], ascending=[True, False])[
+        label_col
+    ].tolist():
+        text = str(label)
+        if text not in ordered:
+            ordered.append(text)
+    return ordered
+
+
 def show_block_note(text: str) -> None:
     st.caption(f"口径说明：{text}")
 
@@ -1040,8 +1100,9 @@ def render_bar_chart(
         lambda value: f"{value:.2%}" if metric in PCT_COLUMNS else f"{value:,.2f}"
     )
     chart_data["_is_funding_asset_class"] = False
-    if label_col == "asset_class":
-        chart_data["_is_funding_asset_class"] = chart_data[label_col].map(is_funding_asset_class)
+    funding_label_col = "asset_class" if "asset_class" in chart_data.columns else label_col
+    if label_col in {"asset_class", "asset_class_display"}:
+        chart_data["_is_funding_asset_class"] = chart_data[funding_label_col].map(is_funding_asset_class)
         chart_data["_color_note"] = np.where(
             chart_data["_is_funding_asset_class"],
             "回购/融资科目：使用中性颜色",
@@ -1100,7 +1161,7 @@ def render_bar_chart(
         alt.Tooltip("_label:N", title=display_names_for_mode(comparison_mode).get(label_col, label_col)),
         alt.Tooltip("_value:Q", title=value_title, format=".2%" if metric in PCT_COLUMNS else ",.2f"),
     ]
-    if label_col == "asset_class":
+    if label_col in {"asset_class", "asset_class_display"}:
         tooltips.append(alt.Tooltip("_color_note:N", title="颜色口径"))
     if threshold_color_value is not None and "_cost_rate_note" in chart_data.columns:
         tooltips.append(alt.Tooltip("_cost_rate_note:N", title="成本率判断"))
@@ -1596,7 +1657,7 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
             {
                 "label": str(row["strategy_book_display_label"]),
                 "value": amount(float(row["full_market_value_current"])),
-                "delta": f"综合收益率 {pct(float(row['comprehensive_return_mtd']))}",
+                "delta": f"综合收益率{pct(float(row['comprehensive_return_mtd']))}",
                 "tone": "internal" if row["strategy_book_scope"] == "委内" else "external",
             }
             for _, row in summary.iterrows()
@@ -2348,9 +2409,11 @@ def main() -> None:
         baseline_label = "上月"
         capital_label = "本月平均资金占用"
     quality = quality_metrics(data, current_month, comparison_mode)
-    asset_class_summary = ensure_summary_columns(
-        comparison_summary(data, current_month, prior_month, ["asset_class"], comparison_mode),
-        comparison_mode,
+    asset_class_summary = enrich_asset_class_display(
+        ensure_summary_columns(
+            comparison_summary(data, current_month, prior_month, ["asset_class"], comparison_mode),
+            comparison_mode,
+        )
     )
 
     section_anchor("overview")
@@ -2392,7 +2455,7 @@ def main() -> None:
     scale_income_label = "年初以来综合收益" if comparison_mode == "年初以来" else "本月综合收益"
     scale_baseline_label = "年初市值" if comparison_mode == "年初以来" else "上月市值"
     show_block_note(
-        f"本表不分账户，直接按投资品种汇总；右侧净规模变化 = 报告月市值 - {scale_baseline_label} - {scale_income_label}，用于近似识别真实增减仓或资金进出。"
+        f"本表不分账户，直接按投资品种汇总；股权/不动产相关品种用资产主题标明并强制纳入图表；右侧净规模变化 = 报告月市值 - {scale_baseline_label} - {scale_income_label}，用于近似识别真实增减仓或资金进出。"
     )
     asset_class_display = asset_class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
     asset_income_metric, asset_income_title, asset_income_value_title = income_chart_config(
@@ -2401,18 +2464,21 @@ def main() -> None:
         " Top/Bottom",
     )
     asset_scale_metric = "net_full_market_value_delta"
-    asset_chart_labels = shared_top_bottom_labels(
+    asset_chart_labels = include_focus_asset_labels(
         asset_class_summary,
-        asset_income_metric,
-        asset_scale_metric,
-        "asset_class",
+        shared_top_bottom_labels(
+            asset_class_summary,
+            asset_income_metric,
+            asset_scale_metric,
+            "asset_class_display",
+        ),
     )
     asset_chart_cols = st.columns(2)
     with asset_chart_cols[0]:
         render_bar_chart(
             asset_class_summary,
             asset_income_metric,
-            "asset_class",
+            "asset_class_display",
             asset_income_title,
             asset_income_value_title,
             comparison_mode=comparison_mode,
@@ -2423,7 +2489,7 @@ def main() -> None:
         render_bar_chart(
             asset_class_summary,
             asset_scale_metric,
-            "asset_class",
+            "asset_class_display",
             "投资品种净规模变化 Top/Bottom",
             display_names_for_mode(comparison_mode)[asset_scale_metric],
             comparison_mode=comparison_mode,
@@ -2434,6 +2500,7 @@ def main() -> None:
         format_table(
             asset_class_display[
                 [
+                    "asset_theme",
                     "asset_class",
                     "full_market_value_current",
                     "full_market_value_prior",
@@ -2645,7 +2712,7 @@ def main() -> None:
     section_anchor("manager-breakdown")
     st.subheader("品种内经理拆解")
     show_block_note(
-        f"本表用于回答选定品种下，结果由哪些投资经理贡献或拖累；默认合并账户展示经理整体表现，当前采用{comparison_mode}口径。"
+        f"本表用于回答选定品种下，结果由哪些投资经理贡献或拖累；投资经理筛选会同步收窄本表和资产证据，当前采用{comparison_mode}口径。"
     )
     if st.session_state.get("经理展示口径") not in ["合并账户", "拆分账户"]:
         st.session_state["经理展示口径"] = "合并账户"
@@ -2700,6 +2767,8 @@ def main() -> None:
         manager_summary = manager_summary[manager_summary["account_bucket"] == selected_account]
     if selected_asset_class != ALL:
         manager_summary = manager_summary[manager_summary["asset_class"] == selected_asset_class]
+    if selected_manager != ALL:
+        manager_summary = manager_summary[manager_summary["manager"] == selected_manager]
     manager_display = manager_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
     manager_display_columns = [
         "asset_class",
