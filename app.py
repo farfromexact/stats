@@ -27,6 +27,9 @@ POSITIVE_COLOR = "#122256"
 NEGATIVE_COLOR = "#8B2F2F"
 NEUTRAL_COLOR = "#8EA0B6"
 FUNDING_COLOR = "#6F7F92"
+HEATMAP_NEUTRAL_COLOR = "#F7F4EF"
+HEATMAP_POSITIVE_LIGHT = "#B7CCE4"
+HEATMAP_NEGATIVE_LIGHT = "#E3B0AE"
 FUNDING_COST_RATE = 0.0341
 GUARANTEE_COST_RATE = 0.0324
 EFFECTIVE_COST_RATE = 0.0326
@@ -1956,7 +1959,16 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
                     alt.Color(
                         f"{score_col}:Q",
                         title=legend_title,
-                        scale=alt.Scale(domain=[-1, 0, 1], range=[NEGATIVE_COLOR, "#F2F1ED", POSITIVE_COLOR]),
+                        scale=alt.Scale(
+                            domain=[-1, -0.25, 0, 0.25, 1],
+                            range=[
+                                NEGATIVE_COLOR,
+                                HEATMAP_NEGATIVE_LIGHT,
+                                HEATMAP_NEUTRAL_COLOR,
+                                HEATMAP_POSITIVE_LIGHT,
+                                POSITIVE_COLOR,
+                            ],
+                        ),
                     ),
                 ),
                 tooltip=[
@@ -1987,7 +1999,7 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
     )
     st.altair_chart(return_chart, width="stretch")
     st.altair_chart(amount_chart, width="stretch")
-    st.caption("颜色说明：两张热力图共用账户和投资品种排序；颜色按排名强度展示，精确值以 tooltip 和下方表格为准；正回购、逆回购按回购/融资科目处理，使用中性灰蓝色。")
+    st.caption("颜色说明：两张热力图共用账户和投资品种排序；颜色按排名强度展示，正数使用浅蓝到深蓝，负数使用浅红到深红，精确值以 tooltip 和下方表格为准；正回购、逆回购按回购/融资科目处理，使用中性灰蓝色。")
 
 
 def main() -> None:
