@@ -2034,7 +2034,6 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         .mark_line(strokeWidth=2.4, opacity=0.9)
         .encode(
             x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
-            xOffset=alt.XOffset("offset_type:N", sort=[mtd_label_finance, mtd_label_comprehensive]),
             y=alt.Y("income_value:Q", title="收益(亿)"),
             color=alt.Color(
                 "income_type:N",
@@ -2051,7 +2050,6 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         .mark_point(filled=True, size=100, stroke="white", strokeWidth=1.4)
         .encode(
             x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
-            xOffset=alt.XOffset("offset_type:N", sort=[mtd_label_finance, mtd_label_comprehensive]),
             y=alt.Y("income_value:Q", title="收益(亿)"),
             color=alt.Color(
                 "income_type:N",
@@ -2384,7 +2382,7 @@ def main() -> None:
 
     section_anchor("charts-overview")
     st.subheader("图表总览")
-    show_block_note("左图用柱展示全组合规模、用红色点线展示正回购融资余额；右图用柱展示当月30天收益，用彩色点展示对应口径的年初以来累计收益。")
+    show_block_note("左图用柱展示全组合规模、用红色点线展示正回购融资余额；右图用柱展示当月30天收益，用折线+点展示对应口径的年初以来累计收益。")
     render_monthly_trends(data, comparison_mode)
 
     st.divider()
