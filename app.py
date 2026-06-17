@@ -16,11 +16,17 @@ except ImportError:  # pragma: no cover - compatibility with older Streamlit
 from account_review import asset_evidence, asset_evidence_year_open, comparison_summary
 from config import DATA_DIR
 from portfolio_data import available_months, load_snapshots
+from strategy_books import (
+    STRATEGY_BOOK_LABEL_ORDER,
+    excluded_strategy_book_detail,
+    strategy_book_detail_summary,
+    strategy_book_summary,
+)
 
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
-DATA_SCHEMA_VERSION = "2026-06-06-duration-v1"
+DATA_SCHEMA_VERSION = "2026-06-17-strategy-book-v1"
 ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
 CHART_EPSILON = 1e-9
 POSITIVE_COLOR = "#122256"
@@ -401,7 +407,14 @@ DISPLAY_NAMES = {
     "duration": "久期",
     "account_bucket": "账户",
     "mandate_type": "委受托维度",
+    "fund_book_name": "基金账套名称",
+    "group_book_name": "分组账套名称",
+    "asset_major_class": "资产大类",
+    "asset_class_level_1": "资产分类一级",
+    "asset_class_level_2": "资产分类二级",
+    "asset_class_level_3": "资产分类三级",
     "asset_class": "投资品种",
+    "trade_strategy": "交易策略",
     "manager": "投资经理",
     "asset_name": "资产名称",
     "asset_code": "资产代码",
@@ -445,6 +458,12 @@ DISPLAY_NAMES = {
     "return_rate_status": "收益率状态",
     "return_deviation": "收益率偏离幅度",
     "mapped_asset_classes": "映射投资品种",
+    "strategy_book_scope": "委内/委外",
+    "strategy_book": "配置/交易分类",
+    "strategy_book_display_label": "rat race分类",
+    "strategy_book_section": "二级展示",
+    "strategy_book_item": "明细展示",
+    "strategy_book_exclusion_reason": "未纳入原因",
 }
 
 YTD_DISPLAY_OVERRIDES = {
@@ -518,6 +537,11 @@ def ensure_runtime_columns(data: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]
         "avg_capital_ytd": 0.0,
         "finance_income_ytd": 0.0,
         "comprehensive_income_ytd": 0.0,
+        "asset_major_class": "",
+        "asset_class_level_1": "",
+        "asset_class_level_2": "",
+        "asset_class_level_3": "",
+        "trade_strategy": "",
     }
     missing = [column for column in required_runtime_columns if column not in data.columns]
     if not missing:
@@ -795,6 +819,7 @@ def sidebar_nav() -> None:
         <a class="sidebar-nav-button" href="#overview">总体表现</a>
         <a class="sidebar-nav-button" href="#charts-overview">图表总览</a>
         <a class="sidebar-nav-button" href="#asset-class-overview">投资品种图表/表格</a>
+        <a class="sidebar-nav-button" href="#strategy-book-overview">rat race</a>
         <a class="sidebar-nav-button" href="#account-overview">账户层图表/表格</a>
         <a class="sidebar-nav-button" href="#duration-overview">账户久期</a>
         <a class="sidebar-nav-button" href="#account-class-breakdown">账户内品种拆解</a>
@@ -970,6 +995,7 @@ def render_bar_chart(
     label_order: list[str] | None = None,
     threshold_lines: list[dict[str, object]] | None = None,
     threshold_color_value: float | None = None,
+    show_value_labels: bool = False,
 ) -> None:
     normalized_label_order = [str(label) for label in label_order or []]
     if normalized_label_order:
@@ -991,6 +1017,9 @@ def render_bar_chart(
     chart_data = chart_data.copy()
     chart_data["_label"] = chart_data[label_col].astype(str)
     chart_data["_value"] = _numeric_series(chart_data, metric)
+    chart_data["_value_label"] = chart_data["_value"].map(
+        lambda value: f"{value:.2%}" if metric in PCT_COLUMNS else f"{value:,.2f}"
+    )
     chart_data["_is_funding_asset_class"] = False
     if label_col == "asset_class":
         chart_data["_is_funding_asset_class"] = chart_data[label_col].map(is_funding_asset_class)
@@ -1077,21 +1106,29 @@ def render_bar_chart(
         tooltip_format = ".2%" if column in PCT_COLUMNS else ",.2f"
         tooltips.append(alt.Tooltip(f"{column}:Q", title=tooltip_title, format=tooltip_format))
 
+    x_encoding = {
+        "title": value_title,
+        "axis": alt.Axis(format=".1%" if metric in PCT_COLUMNS else ",.1f"),
+    }
+    if show_value_labels and not chart_data.empty:
+        min_value = float(chart_data["_value"].min())
+        max_value = float(chart_data["_value"].max())
+        if min_value >= 0 and max_value > 0:
+            x_encoding["scale"] = alt.Scale(domain=[0, max_value * 1.16])
+
+    y_encoding = alt.Y(
+        "_label:N",
+        title=None,
+        sort=normalized_label_order or alt.SortField(field="_value", order="descending"),
+        axis=alt.Axis(labelLimit=220),
+    )
+
     bars = (
         alt.Chart(chart_data)
         .mark_bar(cornerRadiusEnd=2)
         .encode(
-            x=alt.X(
-                "_value:Q",
-                title=value_title,
-                axis=alt.Axis(format=".1%" if metric in PCT_COLUMNS else ",.1f"),
-            ),
-            y=alt.Y(
-                "_label:N",
-                title=None,
-                sort=normalized_label_order or alt.SortField(field="_value", order="descending"),
-                axis=alt.Axis(labelLimit=220),
-            ),
+            x=alt.X("_value:Q", **x_encoding),
+            y=y_encoding,
             color=alt.Color(
                 "_bar_color_group:N",
                 title=None,
@@ -1106,6 +1143,17 @@ def render_bar_chart(
     )
     zero_rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#475569", opacity=0.55).encode(x="x:Q")
     chart_layers = bars + zero_rule
+    if show_value_labels:
+        value_labels = (
+            alt.Chart(chart_data)
+            .mark_text(align="left", baseline="middle", dx=5, color="#475569", fontSize=11)
+            .encode(
+                x=alt.X("_value:Q", **x_encoding),
+                y=y_encoding,
+                text=alt.Text("_value_label:N"),
+            )
+        )
+        chart_layers = chart_layers + value_labels
     if threshold_lines:
         threshold_frame = pd.DataFrame(threshold_lines).copy()
         if not threshold_frame.empty and "value" in threshold_frame.columns:
@@ -1514,6 +1562,162 @@ def render_asset_return_completion(data: pd.DataFrame, current_month: str) -> No
         width="stretch",
         hide_index=True,
     )
+
+
+def render_strategy_book_overview(data: pd.DataFrame, current_month: str, comparison_mode: str) -> None:
+    summary = strategy_book_summary(data, current_month, comparison_mode)
+    detail = strategy_book_detail_summary(data, current_month, comparison_mode)
+
+    if summary.empty or summary["record_count_current"].sum() == 0:
+        st.info("当前没有可展示的 rat race 数据。")
+        return
+
+    render_kpi_grid(
+        [
+            {
+                "label": str(row["strategy_book_display_label"]),
+                "value": amount(float(row["full_market_value_current"])),
+                "delta": f"综合收益率 {pct(float(row['comprehensive_return_mtd']))}",
+            }
+            for _, row in summary.iterrows()
+        ]
+    )
+
+    chart_cols = st.columns(2)
+    with chart_cols[0]:
+        render_bar_chart(
+            summary,
+            "full_market_value_current",
+            "strategy_book_display_label",
+            "rat race分类市值",
+            display_names_for_mode(comparison_mode)["full_market_value_current"],
+            limit=9,
+            label_order=STRATEGY_BOOK_LABEL_ORDER,
+            comparison_mode=comparison_mode,
+            empty_message="当前 rat race 分类暂无可展示的市值。",
+            show_value_labels=True,
+        )
+    with chart_cols[1]:
+        render_bar_chart(
+            summary,
+            "comprehensive_return_mtd",
+            "strategy_book_display_label",
+            "rat race分类综合收益率",
+            display_names_for_mode(comparison_mode)["comprehensive_return_mtd"],
+            limit=9,
+            label_order=STRATEGY_BOOK_LABEL_ORDER,
+            comparison_mode=comparison_mode,
+            empty_message="当前 rat race 分类暂无可展示的收益率。",
+            show_value_labels=True,
+        )
+
+    external_summary = summary[summary["strategy_book_scope"].eq("委外")].copy()
+    external_label_order = [label for label in STRATEGY_BOOK_LABEL_ORDER if label.startswith("委外-")]
+    if not external_summary.empty and external_summary["record_count_current"].sum() > 0:
+        st.caption("委外账户单独放大展示，避免 5 亿级别账户在全量市值图中被委内大类压缩。")
+        external_chart_cols = st.columns(2)
+        with external_chart_cols[0]:
+            render_bar_chart(
+                external_summary,
+                "full_market_value_current",
+                "strategy_book_display_label",
+                "委外账户市值（放大）",
+                display_names_for_mode(comparison_mode)["full_market_value_current"],
+                limit=4,
+                label_order=external_label_order,
+                comparison_mode=comparison_mode,
+                empty_message="当前委外账户暂无可展示的市值。",
+                show_value_labels=True,
+            )
+        with external_chart_cols[1]:
+            render_bar_chart(
+                external_summary,
+                "comprehensive_income_mtd_current",
+                "strategy_book_display_label",
+                "委外账户综合收益额（放大）",
+                display_names_for_mode(comparison_mode)["comprehensive_income_mtd_current"],
+                limit=4,
+                label_order=external_label_order,
+                comparison_mode=comparison_mode,
+                empty_message="当前委外账户暂无可展示的收益额。",
+                show_value_labels=True,
+            )
+
+    if not detail.empty:
+        st.dataframe(
+            format_table(
+                detail[
+                    [
+                        "strategy_book_scope",
+                        "strategy_book",
+                        "strategy_book_section",
+                        "strategy_book_item",
+                        "full_market_value_current",
+                        "finance_income_mtd_current",
+                        "comprehensive_income_mtd_current",
+                        "avg_capital_mtd_current",
+                        "finance_return_mtd",
+                        "comprehensive_return_mtd",
+                        "record_count_current",
+                    ]
+                ],
+                comparison_mode=comparison_mode,
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+
+    excluded = excluded_strategy_book_detail(data, current_month, comparison_mode)
+    if excluded.empty:
+        return
+
+    excluded_market_value = float(pd.to_numeric(excluded["full_market_value_current"], errors="coerce").fillna(0.0).sum())
+    excluded_rows = int(pd.to_numeric(excluded["record_count_current"], errors="coerce").fillna(0).sum())
+    st.caption(
+        f"未纳入 rat race 净市值 {amount(excluded_market_value)}，共 {excluded_rows:,} 条；"
+        "主要承接委内流动性、现金、买入返售、应收、费用、长股投、直投股权、不动产，"
+        "以及富国顶层产品汇总行等对账项。"
+    )
+    reason_totals = (
+        excluded.assign(
+            _market_value=pd.to_numeric(excluded["full_market_value_current"], errors="coerce").fillna(0.0)
+        )
+        .groupby("strategy_book_exclusion_reason", dropna=False)["_market_value"]
+        .sum()
+        .reset_index()
+    )
+    if not reason_totals.empty:
+        reason_totals["_abs_market_value"] = reason_totals["_market_value"].abs()
+        reason_text = "；".join(
+            f"{row['strategy_book_exclusion_reason']} {amount(float(row['_market_value']))}"
+            for _, row in reason_totals.sort_values("_abs_market_value", ascending=False).head(4).iterrows()
+        )
+        st.caption(f"未纳入原因摘要：{reason_text}。")
+    with st.expander("未纳入 rat race 对账明细", expanded=False):
+        st.dataframe(
+            format_table(
+                excluded[
+                    [
+                        "strategy_book_exclusion_reason",
+                        "mandate_type",
+                        "fund_book_name",
+                        "asset_major_class",
+                        "trade_strategy",
+                        "asset_class_level_1",
+                        "asset_class_level_2",
+                        "asset_class",
+                        "full_market_value_current",
+                        "finance_income_mtd_current",
+                        "comprehensive_income_mtd_current",
+                        "avg_capital_mtd_current",
+                        "record_count_current",
+                    ]
+                ].head(100),
+                comparison_mode=comparison_mode,
+            ),
+            width="stretch",
+            hide_index=True,
+        )
 
 
 def account_duration_summary(data: pd.DataFrame, current_month: str) -> pd.DataFrame:
@@ -2030,7 +2234,7 @@ def main() -> None:
 
     if runtime_missing_columns:
         st.warning(
-            "当前缓存或源表缺少年初以来口径字段，已临时补空以避免页面中断；"
+            "当前缓存或源表缺少部分运行字段，已临时补空以避免页面中断；"
             "请点击左侧“刷新数据”重新读取源文件。缺失字段："
             + "、".join(runtime_missing_columns)
         )
@@ -2226,6 +2430,19 @@ def main() -> None:
         hide_index=True,
     )
     render_asset_return_completion(data, current_month)
+
+    st.divider()
+
+    section_anchor("strategy-book-overview")
+    st.subheader("rat race")
+    show_block_note(
+        "本模块复刻管理透视表口径：委内展示委托资管下的固收配置盘、固收交易盘、非标、权益配置盘、权益交易盘；"
+        "委外并列展示人保/泰康固收与富国/华泰权益。富国/华泰权益按账户全量纳入，包含现金、应收、费用等调节项；"
+        "富国顶层产品行只作为对账提示，避免重复计算底层持仓。"
+    )
+    render_strategy_book_overview(data, current_month, comparison_mode)
+
+    st.divider()
 
     section_anchor("account-overview")
     st.subheader("账户层：规模变化与收益贡献")

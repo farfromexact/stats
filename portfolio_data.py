@@ -8,6 +8,14 @@ from config import DATA_DIR, FIELD_MAP, NUMERIC_COLUMNS, OPTIONAL_FIELDS, REQUIR
 
 
 DATE_TOKEN = re.compile(r"(20\d{6})")
+OPTIONAL_FIELD_DEFAULTS = {
+    "久期": 0.0,
+    "资产大类": "",
+    "资产分类一级": "",
+    "资产分类二级": "",
+    "资产分类三级": "",
+    "交易策略": "",
+}
 
 
 def _snapshot_month(file_name: str) -> str | None:
@@ -46,17 +54,17 @@ def _clean_label(series: pd.Series, fallback: str) -> pd.Series:
 
 
 def _read_wide_sheet(path: Path) -> tuple[pd.DataFrame, str, list[str]]:
-    workbook = pd.ExcelFile(path)
-    best_sheet = ""
-    best_missing = REQUIRED_FIELDS
-    for sheet_name in workbook.sheet_names:
-        header = pd.read_excel(workbook, sheet_name=sheet_name, nrows=0)
-        missing = [field for field in REQUIRED_FIELDS if field not in header.columns]
-        if len(missing) < len(best_missing):
-            best_sheet = sheet_name
-            best_missing = missing
-        if not missing:
-            return pd.read_excel(workbook, sheet_name=sheet_name), sheet_name, []
+    with pd.ExcelFile(path) as workbook:
+        best_sheet = ""
+        best_missing = REQUIRED_FIELDS
+        for sheet_name in workbook.sheet_names:
+            header = pd.read_excel(workbook, sheet_name=sheet_name, nrows=0)
+            missing = [field for field in REQUIRED_FIELDS if field not in header.columns]
+            if len(missing) < len(best_missing):
+                best_sheet = sheet_name
+                best_missing = missing
+            if not missing:
+                return pd.read_excel(workbook, sheet_name=sheet_name), sheet_name, []
     return pd.DataFrame(), best_sheet, best_missing
 
 
@@ -92,7 +100,7 @@ def _read_one(path: Path) -> tuple[pd.DataFrame | None, dict]:
     for field in OPTIONAL_FIELDS:
         column = FIELD_MAP[field]
         if column not in standard.columns:
-            standard[column] = 0.0
+            standard[column] = OPTIONAL_FIELD_DEFAULTS.get(field, "")
     standard.insert(0, "source_row_no", raw.index + 2)
     standard.insert(0, "source_file_name", path.name)
     standard.insert(0, "source_file_hash", log["source_file_hash"])
@@ -103,6 +111,14 @@ def _read_one(path: Path) -> tuple[pd.DataFrame | None, dict]:
 
     standard["account_bucket"] = _clean_label(standard["account_bucket"], "未分账户/待确认")
     standard["asset_class"] = _clean_label(standard["asset_class"], "未分类/待确认")
+    for column in [
+        "asset_major_class",
+        "asset_class_level_1",
+        "asset_class_level_2",
+        "asset_class_level_3",
+        "trade_strategy",
+    ]:
+        standard[column] = _clean_label(standard[column], "未填报")
     standard["manager"] = _clean_label(standard["manager"], "未分配/待确认")
     standard["asset_name"] = _clean_label(standard["asset_name"], "未命名资产")
     standard["asset_key"] = (

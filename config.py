@@ -28,6 +28,11 @@ REQUIRED_FIELDS = [
 
 OPTIONAL_FIELDS = [
     "久期",
+    "资产大类",
+    "资产分类一级",
+    "资产分类二级",
+    "资产分类三级",
+    "交易策略",
 ]
 
 FIELD_MAP = {
@@ -51,6 +56,11 @@ FIELD_MAP = {
     "财务收益（本年以来）(亿)": "finance_income_ytd",
     "综合收益（本年以来）(亿)": "comprehensive_income_ytd",
     "久期": "duration",
+    "资产大类": "asset_major_class",
+    "资产分类一级": "asset_class_level_1",
+    "资产分类二级": "asset_class_level_2",
+    "资产分类三级": "asset_class_level_3",
+    "交易策略": "trade_strategy",
 }
 
 NUMERIC_COLUMNS = [
