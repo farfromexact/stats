@@ -26,7 +26,7 @@ from strategy_books import (
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
-DATA_SCHEMA_VERSION = "2026-06-17-strategy-book-v2"
+DATA_SCHEMA_VERSION = "2026-07-02-snapshot-20260630"
 ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
 CHART_EPSILON = 1e-9
 POSITIVE_COLOR = "#122256"
