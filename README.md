@@ -42,7 +42,7 @@
 - 数据读取与字段标准化在 `portfolio_data.py`。
 - 账户、品种、经理和资产证据汇总在 `account_review.py`。
 - 委内/委外、配置盘/交易盘分类规则在 `strategy_books.py`。
-- rat race 模块的映射说明和 20260531 控制数见 `docs/strategy_book_mapping.md`。
+- rat race 模块的映射说明和 20260630 控制数见 `docs/strategy_book_mapping.md`。
 - 必需字段、可选字段和标准列名集中维护在 `config.py`。
 
 ## 本地运行

@@ -174,27 +174,51 @@ class StrategyBookClassificationTest(unittest.TestCase):
 
 
 class StrategyBookActualSnapshotTest(unittest.TestCase):
-    def test_20260531_control_totals(self):
+    def assert_control_totals(self, month, expected):
         data, _, errors = load_snapshots(DATA_DIR)
         self.assertEqual(errors, [])
-        summary = strategy_book_summary(data, "2026-05", "年初以来")
+        summary = strategy_book_summary(data, month, "年初以来")
         actual = dict(zip(summary["strategy_book"], summary["full_market_value_current"]))
-        expected = {
-            "固收-配置盘": 5021.527813,
-            "固收-交易盘": 952.914891,
-            "非标": 227.487674,
-            "权益-配置盘": 391.734296,
-            "权益-交易盘": 216.014149,
-            "人保固收": 127.585198,
-            "泰康固收": 44.725977,
-            "富国权益": 5.304112,
-            "华泰权益": 5.279801,
-            "太平资产香港": 4.358990,
-            "太保投资香港": 6.805692,
-            "国寿富兰克林": 8.348263,
-        }
         for label, value in expected.items():
             self.assertAlmostEqual(actual[label], value, places=2)
+
+    def test_20260531_control_totals(self):
+        self.assert_control_totals(
+            "2026-05",
+            {
+                "固收-配置盘": 5021.527813,
+                "固收-交易盘": 952.914891,
+                "非标": 227.487674,
+                "权益-配置盘": 391.734296,
+                "权益-交易盘": 216.014149,
+                "人保固收": 127.585198,
+                "泰康固收": 44.725977,
+                "富国权益": 5.304112,
+                "华泰权益": 5.279801,
+                "太平资产香港": 4.358990,
+                "太保投资香港": 6.805692,
+                "国寿富兰克林": 8.348263,
+            },
+        )
+
+    def test_20260630_control_totals(self):
+        self.assert_control_totals(
+            "2026-06",
+            {
+                "固收-配置盘": 5095.656198,
+                "固收-交易盘": 976.528121,
+                "非标": 236.675092,
+                "权益-配置盘": 369.793145,
+                "权益-交易盘": 242.281259,
+                "人保固收": 126.788807,
+                "泰康固收": 44.388522,
+                "富国权益": 5.465564,
+                "华泰权益": 5.606492,
+                "太平资产香港": 4.165945,
+                "太保投资香港": 6.642500,
+                "国寿富兰克林": 8.349550,
+            },
+        )
 
 
 if __name__ == "__main__":
