@@ -61,6 +61,19 @@ EQUITY_TRADING_CLASSES = {
     "股票型保险资管产品",
     "混合型保险资管产品",
 }
+OUTSOURCED_EQUITY_HOLDING_CLASSES = {
+    "股票",
+    "股票型基金",
+    "混合型基金",
+    "股票型保险资管产品",
+    "混合型保险资管产品",
+    "单一资产管理计划（股票类产品）",
+    "股权基金",
+    "未上市企业股权",
+    "股权计划",
+}
+OUTSOURCED_EQUITY_STOCK_CLASSES = {"股票"}
+OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER = ["股票", "基金及产品"]
 OUTSOURCED_FIXED_CLASSES = {
     "同业存单",
     "政府债",
@@ -306,6 +319,26 @@ def assign_strategy_book_columns(data: pd.DataFrame) -> pd.DataFrame:
     working["strategy_book_item"] = working.apply(strategy_book_item, axis=1)
     working["strategy_book_exclusion_reason"] = working.apply(exclusion_reason, axis=1)
     return working
+
+
+def outsourced_equity_holding_type(asset_class: object) -> str:
+    label = "" if pd.isna(asset_class) else str(asset_class).strip()
+    if label in OUTSOURCED_EQUITY_STOCK_CLASSES:
+        return "股票"
+    if label in OUTSOURCED_EQUITY_HOLDING_CLASSES:
+        return "基金及产品"
+    return "其他"
+
+
+def outsourced_equity_holding_slice(data: pd.DataFrame) -> pd.DataFrame:
+    working = assign_strategy_book_columns(data)
+    working["outsourced_equity_holding_type"] = working["asset_class"].map(outsourced_equity_holding_type)
+    if working.empty:
+        return working
+    return working[
+        working["strategy_book_scope"].eq("委外")
+        & working["outsourced_equity_holding_type"].isin(OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER)
+    ].copy()
 
 
 def _metric_columns(comparison_mode: str) -> tuple[str, str, str]:

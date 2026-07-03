@@ -146,6 +146,23 @@ def filter_current(
     return subset
 
 
+def _asset_evidence_group_columns(extra_group_cols: list[str] | None = None) -> list[str]:
+    base_cols = ["asset_key", "asset_name", "asset_code", "trade_code", "account_bucket", "asset_class", "manager"]
+    cols: list[str] = []
+    for column in (extra_group_cols or []) + base_cols:
+        if column not in cols:
+            cols.append(column)
+    return cols
+
+
+def _ensure_group_columns(data: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
+    working = data.copy()
+    for column in group_cols:
+        if column not in working.columns:
+            working[column] = ""
+    return working
+
+
 def asset_evidence(
     data: pd.DataFrame,
     current_month: str,
@@ -153,6 +170,7 @@ def asset_evidence(
     account: str | None = None,
     asset_class: str | None = None,
     manager: str | None = None,
+    extra_group_cols: list[str] | None = None,
 ) -> pd.DataFrame:
     subset = data.copy()
     if account and account != "全部":
@@ -162,7 +180,8 @@ def asset_evidence(
     if manager and manager != "全部":
         subset = subset[subset["manager"] == manager]
 
-    cols = ["asset_key", "asset_name", "asset_code", "trade_code", "account_bucket", "asset_class", "manager"]
+    cols = _asset_evidence_group_columns(extra_group_cols)
+    subset = _ensure_group_columns(subset, cols)
     current = (
         subset[subset["snapshot_month"] == current_month]
         .groupby(cols, dropna=False)
@@ -222,6 +241,7 @@ def asset_evidence_year_open(
     account: str | None = None,
     asset_class: str | None = None,
     manager: str | None = None,
+    extra_group_cols: list[str] | None = None,
 ) -> pd.DataFrame:
     subset = data[data["snapshot_month"] == current_month].copy()
     if account and account != "全部":
@@ -231,7 +251,8 @@ def asset_evidence_year_open(
     if manager and manager != "全部":
         subset = subset[subset["manager"] == manager]
 
-    cols = ["asset_key", "asset_name", "asset_code", "trade_code", "account_bucket", "asset_class", "manager"]
+    cols = _asset_evidence_group_columns(extra_group_cols)
+    subset = _ensure_group_columns(subset, cols)
     evidence = (
         subset.groupby(cols, dropna=False)
         .agg(

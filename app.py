@@ -17,8 +17,11 @@ from account_review import asset_evidence, asset_evidence_year_open, comparison_
 from config import DATA_DIR
 from portfolio_data import available_months, load_snapshots
 from strategy_books import (
+    EXTERNAL_STRATEGY_BOOK_ORDER,
+    OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER,
     STRATEGY_BOOK_LABEL_ORDER,
     excluded_strategy_book_detail,
+    outsourced_equity_holding_slice,
     strategy_book_detail_summary,
     strategy_book_summary,
 )
@@ -492,6 +495,7 @@ DISPLAY_NAMES = {
     "strategy_book_section": "二级展示",
     "strategy_book_item": "明细展示",
     "strategy_book_exclusion_reason": "未纳入原因",
+    "outsourced_equity_holding_type": "权益类型",
 }
 
 YTD_DISPLAY_OVERRIDES = {
@@ -1722,7 +1726,134 @@ def render_asset_return_completion(data: pd.DataFrame, current_month: str) -> No
     )
 
 
-def render_strategy_book_overview(data: pd.DataFrame, current_month: str, comparison_mode: str) -> None:
+def asset_evidence_sort_options(comparison_mode: str) -> list[str]:
+    if comparison_mode == "年初以来":
+        return ["收益贡献", "收益拖累", "规模增加", "规模减少", "年初持仓变化"]
+    return ["收益贡献", "收益拖累", "规模增加", "规模减少", "新增退出"]
+
+
+def sort_asset_evidence(evidence: pd.DataFrame, sort_choice: str, comparison_mode: str) -> pd.DataFrame:
+    if evidence.empty:
+        return evidence
+    if sort_choice == "收益贡献":
+        return evidence.sort_values("comprehensive_income_mtd_current", ascending=False)
+    if sort_choice == "收益拖累":
+        return evidence.sort_values("comprehensive_income_mtd_current", ascending=True)
+    if sort_choice == "规模增加":
+        return evidence.sort_values("full_market_value_delta", ascending=False)
+    if sort_choice == "规模减少":
+        return evidence.sort_values("full_market_value_delta", ascending=True)
+
+    if comparison_mode == "年初以来":
+        order = {
+            "年初无持仓、本月有持仓": 0,
+            "年初有持仓、本月无持仓": 1,
+            "较年初增加": 2,
+            "较年初减少": 3,
+            "较年初持平": 4,
+        }
+    else:
+        order = {"新增": 0, "退出": 1, "存续增加": 2, "存续减少": 3}
+    return evidence.assign(_order=evidence["change_type"].map(order).fillna(9)).sort_values(
+        ["_order", "full_market_value_delta"],
+        ascending=[True, False],
+    )
+
+
+def render_outsourced_equity_evidence(
+    data: pd.DataFrame,
+    current_month: str,
+    prior_month: str,
+    comparison_mode: str,
+) -> None:
+    st.markdown("#### 委外权益持仓（资产证据口径）")
+    show_block_note(
+        "本表先按现有委外分类扫描账户，再只保留权益资产分类；"
+        "现金、存款、货币基金、债券、固收基金、应收、费用和轧差项不进入本表。"
+    )
+
+    outsourced_equity = outsourced_equity_holding_slice(data)
+    if outsourced_equity.empty:
+        st.info("当前没有可展示的委外权益持仓。")
+        return
+
+    group_cols = ["strategy_book", "strategy_book_display_label", "outsourced_equity_holding_type"]
+    if comparison_mode == "年初以来":
+        evidence = asset_evidence_year_open(
+            outsourced_equity,
+            current_month,
+            extra_group_cols=group_cols,
+        )
+    else:
+        evidence = asset_evidence(
+            outsourced_equity,
+            current_month,
+            prior_month,
+            extra_group_cols=group_cols,
+        )
+
+    company_options = [ALL] + [f"委外-{label}" for label in EXTERNAL_STRATEGY_BOOK_ORDER]
+    equity_type_options = [ALL] + OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER
+    control_cols = st.columns([0.24, 0.22, 0.54])
+    with control_cols[0]:
+        selected_company = st.selectbox("委外公司", company_options, key="委外权益公司")
+    with control_cols[1]:
+        selected_equity_type = st.selectbox("权益类型", equity_type_options, key="委外权益类型")
+    with control_cols[2]:
+        sort_choice = st.radio(
+            "委外权益资产证据视角",
+            asset_evidence_sort_options(comparison_mode),
+            horizontal=True,
+            key="委外权益资产证据视角",
+        )
+
+    if selected_company != ALL:
+        evidence = evidence[evidence["strategy_book_display_label"].eq(selected_company)]
+    if selected_equity_type != ALL:
+        evidence = evidence[evidence["outsourced_equity_holding_type"].eq(selected_equity_type)]
+    if evidence.empty:
+        st.info("当前筛选条件下没有可展示的委外权益持仓。")
+        return
+
+    evidence = sort_asset_evidence(evidence, sort_choice, comparison_mode)
+    current_value = float(pd.to_numeric(evidence["full_market_value_current"], errors="coerce").fillna(0.0).sum())
+    current_rows = int(pd.to_numeric(evidence["source_rows_current"], errors="coerce").fillna(0).sum())
+    st.caption(f"当前筛选后委外权益持仓市值 {amount(current_value)}，共 {current_rows:,} 条源记录。")
+    st.dataframe(
+        format_table(
+            evidence[
+                [
+                    "strategy_book_display_label",
+                    "outsourced_equity_holding_type",
+                    "change_type",
+                    "asset_name",
+                    "asset_code",
+                    "trade_code",
+                    "account_bucket",
+                    "asset_class",
+                    "manager",
+                    "full_market_value_current",
+                    "full_market_value_prior",
+                    "full_market_value_delta",
+                    "finance_income_mtd_current",
+                    "comprehensive_income_mtd_current",
+                    "source_rows_current",
+                    "source_rows_prior",
+                ]
+            ].head(500),
+            comparison_mode=comparison_mode,
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+
+
+def render_strategy_book_overview(
+    data: pd.DataFrame,
+    current_month: str,
+    prior_month: str,
+    comparison_mode: str,
+) -> None:
     summary = strategy_book_summary(data, current_month, comparison_mode)
     detail = strategy_book_detail_summary(data, current_month, comparison_mode)
 
@@ -1826,6 +1957,8 @@ def render_strategy_book_overview(data: pd.DataFrame, current_month: str, compar
             width="stretch",
             hide_index=True,
         )
+
+    render_outsourced_equity_evidence(data, current_month, prior_month, comparison_mode)
 
     excluded = excluded_strategy_book_detail(data, current_month, comparison_mode)
     if excluded.empty:
@@ -2629,7 +2762,7 @@ def main() -> None:
         "富国顶层产品行只作为对账提示，避免重复计算底层持仓；"
         "卡片胶囊数字为综合收益率。"
     )
-    render_strategy_book_overview(data, current_month, comparison_mode)
+    render_strategy_book_overview(data, current_month, prior_month, comparison_mode)
 
     st.divider()
 
@@ -2909,7 +3042,7 @@ def main() -> None:
             selected_asset_class,
             selected_manager,
         )
-        evidence_options = ["收益贡献", "收益拖累", "规模增加", "规模减少", "年初持仓变化"]
+        evidence_options = asset_evidence_sort_options(comparison_mode)
     else:
         show_block_note(
             f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按报告月份和上一可用月份 {prior_month} 是否出现及市值变化判断。"
@@ -2922,35 +3055,13 @@ def main() -> None:
             selected_asset_class,
             selected_manager,
         )
-        evidence_options = ["收益贡献", "收益拖累", "规模增加", "规模减少", "新增退出"]
+        evidence_options = asset_evidence_sort_options(comparison_mode)
     sort_choice = st.radio(
         "资产证据视角",
         evidence_options,
         horizontal=True,
     )
-    if sort_choice == "收益贡献":
-        evidence = evidence.sort_values("comprehensive_income_mtd_current", ascending=False)
-    elif sort_choice == "收益拖累":
-        evidence = evidence.sort_values("comprehensive_income_mtd_current", ascending=True)
-    elif sort_choice == "规模增加":
-        evidence = evidence.sort_values("full_market_value_delta", ascending=False)
-    elif sort_choice == "规模减少":
-        evidence = evidence.sort_values("full_market_value_delta", ascending=True)
-    else:
-        if comparison_mode == "年初以来":
-            order = {
-                "年初无持仓、本月有持仓": 0,
-                "年初有持仓、本月无持仓": 1,
-                "较年初增加": 2,
-                "较年初减少": 3,
-                "较年初持平": 4,
-            }
-        else:
-            order = {"新增": 0, "退出": 1, "存续增加": 2, "存续减少": 3}
-        evidence = evidence.assign(_order=evidence["change_type"].map(order).fillna(9)).sort_values(
-            ["_order", "full_market_value_delta"],
-            ascending=[True, False],
-        )
+    evidence = sort_asset_evidence(evidence, sort_choice, comparison_mode)
 
     st.dataframe(
         format_table(
