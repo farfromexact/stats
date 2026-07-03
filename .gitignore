@@ -1,4 +1,5 @@
 .streamlit/secrets.toml
+.streamlit/local_full_app
 __pycache__/
 *.log
 *.pid

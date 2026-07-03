@@ -38,7 +38,7 @@ ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
 DATA_SCHEMA_VERSION = "2026-07-02-snapshot-20260630"
 ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
-LOCAL_SECRETS_PATH = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+LOCAL_FULL_APP_MARKER_PATH = Path(__file__).resolve().parent / ".streamlit" / "local_full_app"
 MAINTENANCE_MESSAGE = "多事之秋，我们秋天再见"
 CHART_EPSILON = 1e-9
 POSITIVE_COLOR = "#122256"
@@ -427,12 +427,10 @@ def _secret_flag(name: str) -> str | None:
 
 
 def maintenance_mode_enabled() -> bool:
-    if _truthy(os.environ.get("PORTFOLIO_APP_FORCE_FULL") or _secret_flag("force_full_app")):
-        return False
     configured = os.environ.get("PORTFOLIO_APP_MAINTENANCE") or _secret_flag("maintenance_mode")
-    if configured is not None:
+    if _truthy(configured):
         return _truthy(configured)
-    return not LOCAL_SECRETS_PATH.exists()
+    return not LOCAL_FULL_APP_MARKER_PATH.exists()
 
 
 def render_maintenance_page() -> None:
