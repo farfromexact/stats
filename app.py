@@ -38,6 +38,8 @@ ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
 DATA_SCHEMA_VERSION = "2026-07-02-snapshot-20260630"
 ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
+LOCAL_SECRETS_PATH = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+MAINTENANCE_MESSAGE = "多事之秋，我们秋天再见"
 CHART_EPSILON = 1e-9
 POSITIVE_COLOR = "#122256"
 NEGATIVE_COLOR = "#8B2F2F"
@@ -407,6 +409,55 @@ def _configured_password() -> str | None:
     except StreamlitSecretNotFoundError:
         pass
     return os.environ.get("PORTFOLIO_APP_PASSWORD")
+
+
+def _truthy(value: object) -> bool:
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
+def _secret_flag(name: str) -> str | None:
+    try:
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except StreamlitSecretNotFoundError:
+        return None
+    return None
+
+
+def maintenance_mode_enabled() -> bool:
+    if _truthy(os.environ.get("PORTFOLIO_APP_FORCE_FULL") or _secret_flag("force_full_app")):
+        return False
+    configured = os.environ.get("PORTFOLIO_APP_MAINTENANCE") or _secret_flag("maintenance_mode")
+    if configured is not None:
+        return _truthy(configured)
+    return not LOCAL_SECRETS_PATH.exists()
+
+
+def render_maintenance_page() -> None:
+    st.markdown(
+        f"""
+        <style>
+        div[data-testid="stSidebar"] {{
+            display: none;
+        }}
+        section.main > div {{
+            padding-top: 28vh;
+        }}
+        .maintenance-message {{
+            color: var(--yacht-navy);
+            font-size: clamp(2.8rem, 7vw, 6.5rem);
+            font-weight: 800;
+            line-height: 1.18;
+            text-align: center;
+            letter-spacing: 0;
+        }}
+        </style>
+        <div class="maintenance-message">{html_text(MAINTENANCE_MESSAGE)}</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def require_login() -> None:
@@ -2522,6 +2573,10 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
 
 def main() -> None:
     apply_yacht_theme()
+    if maintenance_mode_enabled():
+        render_maintenance_page()
+        return
+
     require_login()
 
     st.title("组合管理账户复盘")
