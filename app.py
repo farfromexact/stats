@@ -40,6 +40,7 @@ DATA_SCHEMA_VERSION = "2026-07-02-snapshot-20260630"
 ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
 LOCAL_FULL_APP_MARKER_PATH = Path(__file__).resolve().parent / ".streamlit" / "local_full_app"
 MAINTENANCE_MESSAGE = "多事之秋，我们秋天再见"
+MAINTENANCE_SUBMESSAGE = "如有需要微信找我"
 CHART_EPSILON = 1e-9
 POSITIVE_COLOR = "#122256"
 NEGATIVE_COLOR = "#8B2F2F"
@@ -451,8 +452,18 @@ def render_maintenance_page() -> None:
             text-align: center;
             letter-spacing: 0;
         }}
+        .maintenance-submessage {{
+            margin-top: 1.2rem;
+            color: var(--yacht-blue);
+            font-size: clamp(1.2rem, 2.5vw, 2.2rem);
+            font-weight: 700;
+            line-height: 1.2;
+            text-align: center;
+            letter-spacing: 0;
+        }}
         </style>
         <div class="maintenance-message">{html_text(MAINTENANCE_MESSAGE)}</div>
+        <div class="maintenance-submessage">{html_text(MAINTENANCE_SUBMESSAGE)}</div>
         """,
         unsafe_allow_html=True,
     )
