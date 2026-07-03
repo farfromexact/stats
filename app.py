@@ -1,4 +1,5 @@
 import hmac
+import importlib
 import os
 from html import escape
 from pathlib import Path
@@ -13,18 +14,24 @@ try:
 except ImportError:  # pragma: no cover - compatibility with older Streamlit
     StreamlitSecretNotFoundError = RuntimeError
 
-from account_review import asset_evidence, asset_evidence_year_open, comparison_summary
+import account_review as account_review_module
+import strategy_books as strategy_books_module
 from config import DATA_DIR
 from portfolio_data import available_months, load_snapshots
-from strategy_books import (
-    EXTERNAL_STRATEGY_BOOK_ORDER,
-    OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER,
-    STRATEGY_BOOK_LABEL_ORDER,
-    excluded_strategy_book_detail,
-    outsourced_equity_holding_slice,
-    strategy_book_detail_summary,
-    strategy_book_summary,
-)
+
+account_review_module = importlib.reload(account_review_module)
+strategy_books_module = importlib.reload(strategy_books_module)
+
+asset_evidence = account_review_module.asset_evidence
+asset_evidence_year_open = account_review_module.asset_evidence_year_open
+comparison_summary = account_review_module.comparison_summary
+EXTERNAL_STRATEGY_BOOK_ORDER = strategy_books_module.EXTERNAL_STRATEGY_BOOK_ORDER
+OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER = strategy_books_module.OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER
+STRATEGY_BOOK_LABEL_ORDER = strategy_books_module.STRATEGY_BOOK_LABEL_ORDER
+excluded_strategy_book_detail = strategy_books_module.excluded_strategy_book_detail
+outsourced_equity_holding_slice = strategy_books_module.outsourced_equity_holding_slice
+strategy_book_detail_summary = strategy_books_module.strategy_book_detail_summary
+strategy_book_summary = strategy_books_module.strategy_book_summary
 
 
 ALL = "全部"
