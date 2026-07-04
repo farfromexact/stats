@@ -39,11 +39,19 @@
 ## 数据与口径
 
 - 月度快照文件放在 `data/monthly_snapshots/`。
+- 加速读取文件放在 `data/snapshot_parquet/`，由源 Excel 转换生成；Excel 仍是权威源。
 - 数据读取与字段标准化在 `portfolio_data.py`。
 - 账户、品种、经理和资产证据汇总在 `account_review.py`。
 - 委内/委外、配置盘/交易盘分类规则在 `strategy_books.py`。
 - rat race 模块的映射说明和 20260630 控制数见 `docs/strategy_book_mapping.md`。
 - 必需字段、可选字段和标准列名集中维护在 `config.py`。
+
+## 月度数据更新
+
+1. 将新的月度 Excel 宽表放入 `data/monthly_snapshots/`。
+2. 运行 `python scripts/build_snapshot_parquet.py`，更新 `data/snapshot_parquet/*.parquet` 和 `manifest.json`。
+3. 运行 `python -m unittest`，确认控制数和读取回归通过。
+4. 提交 Excel、parquet、manifest 以及相关代码或文档变更。
 
 ## 本地运行
 

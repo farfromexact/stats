@@ -1,0 +1,50 @@
+{
+  "created_at": "2026-07-04T11:01:55.973524+00:00",
+  "manifest_version": "snapshot-parquet-v1",
+  "snapshots": [
+    {
+      "comprehensive_income_mtd": -33.3534679235,
+      "finance_income_mtd": -13.728544064400001,
+      "full_market_value": 7092.6970851056,
+      "parquet_file": "2026-03.parquet",
+      "sheet_name": "组合管理宽表-新准则时点",
+      "snapshot_month": "2026-03",
+      "source_file_hash": "a304d761e974070051ca1f8cca85fabb1430a20ae6eec95069a24e1f0fa1de9d",
+      "source_file_name": "4.组合管理宽表-新准则时点 20260331.xlsx",
+      "source_rows": 8261
+    },
+    {
+      "comprehensive_income_mtd": 95.09822878680001,
+      "finance_income_mtd": 36.4779466559,
+      "full_market_value": 7307.4698333407005,
+      "parquet_file": "2026-04.parquet",
+      "sheet_name": "组合管理宽表-新准则时点",
+      "snapshot_month": "2026-04",
+      "source_file_hash": "54f608c196c91b300ff7cc886015f952c15517043a359e23ed36f89449afe3b8",
+      "source_file_name": "组合管理宽表-新准则时点 20260430.xlsx",
+      "source_rows": 9743
+    },
+    {
+      "comprehensive_income_mtd": 49.155576142499996,
+      "finance_income_mtd": 25.8802148179,
+      "full_market_value": 7464.2086347598,
+      "parquet_file": "2026-05.parquet",
+      "sheet_name": "组合管理宽表-新准则时点",
+      "snapshot_month": "2026-05",
+      "source_file_hash": "bcaf86cf6edc4ef46ecb936885d134486be81cfd72f94752d7ee4367188db946",
+      "source_file_name": "4. 组合管理宽表-新准则时点 20260531.xlsx",
+      "source_rows": 10266
+    },
+    {
+      "comprehensive_income_mtd": 37.1770708086,
+      "finance_income_mtd": 71.8068154841,
+      "full_market_value": 7635.327939949,
+      "parquet_file": "2026-06.parquet",
+      "sheet_name": "组合管理宽表-新准则时点",
+      "snapshot_month": "2026-06",
+      "source_file_hash": "72a4eda1b9fcac286c911ddd3d641aa2cba44689cae3ac0d8da7844fd3d73ef1",
+      "source_file_name": "4. 组合管理宽表-新准则时点 20260630.xlsx",
+      "source_rows": 12266
+    }
+  ]
+}

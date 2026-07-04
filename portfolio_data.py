@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -8,6 +9,9 @@ from config import DATA_DIR, FIELD_MAP, NUMERIC_COLUMNS, OPTIONAL_FIELDS, REQUIR
 
 
 DATE_TOKEN = re.compile(r"(20\d{6})")
+PARQUET_MANIFEST_VERSION = "snapshot-parquet-v1"
+PARQUET_DIR_NAME = "snapshot_parquet"
+PARQUET_MANIFEST_NAME = "manifest.json"
 OPTIONAL_FIELD_DEFAULTS = {
     "久期": 0.0,
     "资产大类": "",
@@ -46,6 +50,14 @@ def discover_snapshot_files(data_dir: Path = DATA_DIR) -> list[Path]:
         ],
         key=lambda item: _snapshot_month(item.name) or "",
     )
+
+
+def snapshot_parquet_dir(data_dir: Path = DATA_DIR) -> Path:
+    return Path(data_dir).parent / PARQUET_DIR_NAME
+
+
+def snapshot_parquet_manifest_path(data_dir: Path = DATA_DIR) -> Path:
+    return snapshot_parquet_dir(data_dir) / PARQUET_MANIFEST_NAME
 
 
 def _clean_label(series: pd.Series, fallback: str) -> pd.Series:
@@ -142,10 +154,97 @@ def _read_one(path: Path) -> tuple[pd.DataFrame | None, dict]:
     return standard, log
 
 
-def load_snapshots(data_dir: Path = DATA_DIR) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+def _manifest_entry_to_log(entry: dict) -> dict:
+    return {
+        "snapshot_month": entry.get("snapshot_month", ""),
+        "source_file_name": entry.get("source_file_name", ""),
+        "source_file_hash": entry.get("source_file_hash", ""),
+        "source_rows": entry.get("source_rows", 0),
+        "status": "OK",
+        "message": "",
+        "sheet_name": entry.get("sheet_name", ""),
+        "full_market_value": entry.get("full_market_value", 0.0),
+        "finance_income_mtd": entry.get("finance_income_mtd", 0.0),
+        "comprehensive_income_mtd": entry.get("comprehensive_income_mtd", 0.0),
+    }
+
+
+def _parquet_frame_matches_manifest(frame: pd.DataFrame, entry: dict) -> bool:
+    if len(frame) != int(entry.get("source_rows", -1)):
+        return False
+
+    for column, manifest_key in [
+        ("full_market_value", "full_market_value"),
+        ("finance_income_mtd", "finance_income_mtd"),
+        ("comprehensive_income_mtd", "comprehensive_income_mtd"),
+    ]:
+        if column not in frame.columns:
+            return False
+        actual = float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).sum())
+        expected = float(entry.get(manifest_key, 0.0))
+        if abs(actual - expected) > 1e-6:
+            return False
+    return True
+
+
+def _load_parquet_snapshots(data_dir: Path, files: list[Path]) -> tuple[pd.DataFrame, pd.DataFrame, list[str]] | None:
+    manifest_path = snapshot_parquet_manifest_path(data_dir)
+    if not manifest_path.exists():
+        return None
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if manifest.get("manifest_version") != PARQUET_MANIFEST_VERSION:
+        return None
+    entries = manifest.get("snapshots")
+    if not isinstance(entries, list):
+        return None
+
+    entries_by_name = {str(entry.get("source_file_name", "")): entry for entry in entries}
+    if set(entries_by_name) != {path.name for path in files}:
+        return None
+
+    parquet_dir = snapshot_parquet_dir(data_dir)
+    frames: list[pd.DataFrame] = []
+    logs: list[dict] = []
+    for path in files:
+        entry = entries_by_name[path.name]
+        if entry.get("snapshot_month") != _snapshot_month(path.name):
+            return None
+        if entry.get("source_file_hash") != _file_hash(path):
+            return None
+        parquet_file = parquet_dir / str(entry.get("parquet_file", ""))
+        if not parquet_file.exists():
+            return None
+        try:
+            frame = pd.read_parquet(parquet_file)
+        except Exception:
+            return None
+        if not _parquet_frame_matches_manifest(frame, entry):
+            return None
+        frames.append(frame)
+        logs.append(_manifest_entry_to_log(entry))
+
+    if not frames:
+        return None
+    return pd.concat(frames, ignore_index=True), pd.DataFrame(logs), []
+
+
+def load_snapshots(
+    data_dir: Path = DATA_DIR,
+    prefer_parquet: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     files = discover_snapshot_files(data_dir)
     if not files:
         return pd.DataFrame(), pd.DataFrame(), [f"未在 {data_dir} 找到带 YYYYMMDD 日期的 .xlsx 月度宽表。"]
+
+    if prefer_parquet:
+        parquet_result = _load_parquet_snapshots(data_dir, files)
+        if parquet_result is not None:
+            return parquet_result
 
     frames: list[pd.DataFrame] = []
     logs: list[dict] = []

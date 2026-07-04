@@ -1,6 +1,7 @@
 .streamlit/secrets.toml
 .streamlit/local_full_app
 __pycache__/
+test_tmp/
 *.log
 *.pid
 ~$*.xlsx
