@@ -163,6 +163,33 @@ def _ensure_group_columns(data: pd.DataFrame, group_cols: list[str]) -> pd.DataF
     return working
 
 
+def _ensure_numeric_columns(data: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    working = data.copy()
+    for column in columns:
+        if column not in working.columns:
+            working[column] = 0.0
+    return working
+
+
+def _add_evidence_return_columns(evidence: pd.DataFrame) -> pd.DataFrame:
+    evidence = evidence.copy()
+    avg_capital = pd.to_numeric(evidence["avg_capital_mtd_current"], errors="coerce").fillna(0.0)
+    finance_income = pd.to_numeric(evidence["finance_income_mtd_current"], errors="coerce").fillna(0.0)
+    comprehensive_income = pd.to_numeric(
+        evidence["comprehensive_income_mtd_current"],
+        errors="coerce",
+    ).fillna(0.0)
+
+    valid_base = avg_capital > 0.0001
+    evidence["finance_return_mtd"] = None
+    evidence["comprehensive_return_mtd"] = None
+    evidence.loc[valid_base, "finance_return_mtd"] = finance_income.loc[valid_base] / avg_capital.loc[valid_base]
+    evidence.loc[valid_base, "comprehensive_return_mtd"] = (
+        comprehensive_income.loc[valid_base] / avg_capital.loc[valid_base]
+    )
+    return evidence
+
+
 def asset_evidence(
     data: pd.DataFrame,
     current_month: str,
@@ -182,11 +209,21 @@ def asset_evidence(
 
     cols = _asset_evidence_group_columns(extra_group_cols)
     subset = _ensure_group_columns(subset, cols)
+    subset = _ensure_numeric_columns(
+        subset,
+        [
+            "full_market_value",
+            "avg_capital_mtd",
+            "finance_income_mtd",
+            "comprehensive_income_mtd",
+        ],
+    )
     current = (
         subset[subset["snapshot_month"] == current_month]
         .groupby(cols, dropna=False)
         .agg(
             full_market_value_current=("full_market_value", "sum"),
+            avg_capital_mtd_current=("avg_capital_mtd", "sum"),
             finance_income_mtd_current=("finance_income_mtd", "sum"),
             comprehensive_income_mtd_current=("comprehensive_income_mtd", "sum"),
             source_rows_current=("asset_name", "size"),
@@ -208,6 +245,7 @@ def asset_evidence(
     merged = current.merge(prior, on=cols, how="outer")
     for column in [
         "full_market_value_current",
+        "avg_capital_mtd_current",
         "finance_income_mtd_current",
         "comprehensive_income_mtd_current",
         "source_rows_current",
@@ -221,6 +259,7 @@ def asset_evidence(
     merged["full_market_value_delta"] = (
         merged["full_market_value_current"] - merged["full_market_value_prior"]
     )
+    merged = _add_evidence_return_columns(merged)
     merged["change_type"] = "存续"
     merged.loc[(merged["source_rows_prior"] == 0) & (merged["source_rows_current"] > 0), "change_type"] = "新增"
     merged.loc[(merged["source_rows_prior"] > 0) & (merged["source_rows_current"] == 0), "change_type"] = "退出"
@@ -253,11 +292,22 @@ def asset_evidence_year_open(
 
     cols = _asset_evidence_group_columns(extra_group_cols)
     subset = _ensure_group_columns(subset, cols)
+    subset = _ensure_numeric_columns(
+        subset,
+        [
+            "full_market_value",
+            "market_value_year_open",
+            "avg_capital_ytd",
+            "finance_income_ytd",
+            "comprehensive_income_ytd",
+        ],
+    )
     evidence = (
         subset.groupby(cols, dropna=False)
         .agg(
             full_market_value_current=("full_market_value", "sum"),
             full_market_value_prior=("market_value_year_open", "sum"),
+            avg_capital_mtd_current=("avg_capital_ytd", "sum"),
             finance_income_mtd_current=("finance_income_ytd", "sum"),
             comprehensive_income_mtd_current=("comprehensive_income_ytd", "sum"),
             source_rows_current=("asset_name", "size"),
@@ -268,6 +318,7 @@ def asset_evidence_year_open(
     evidence["full_market_value_delta"] = (
         evidence["full_market_value_current"] - evidence["full_market_value_prior"]
     )
+    evidence = _add_evidence_return_columns(evidence)
     evidence["change_type"] = "较年初持平"
     evidence.loc[
         (evidence["full_market_value_prior"].abs() <= 0.0001)
