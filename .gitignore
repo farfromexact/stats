@@ -5,3 +5,5 @@ test_tmp/
 *.log
 *.pid
 ~$*.xlsx
+.streamlit_boot_log.txt
+output/
