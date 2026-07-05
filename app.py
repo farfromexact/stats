@@ -518,6 +518,8 @@ DISPLAY_NAMES = {
     "asset_code": "资产代码",
     "trade_code": "交易代码",
     "change_type": "变化类型",
+    "current_holding_managers": "当前持有投资经理",
+    "ever_holding_managers": "曾经持有投资经理",
     "full_market_value_current": "报告月市值(亿)",
     "full_market_value_prior": "上月市值(亿)",
     "full_market_value_delta": "较上月变化(亿)",
@@ -3137,6 +3139,23 @@ def main() -> None:
         show_block_note(
             "本表用于把账户、品种、经理的结果追溯到资产明细；变化类型基于源表年初市值与当前市值判断，不等同于逐月交易明细。"
         )
+    else:
+        show_block_note(
+            f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按报告月份和上一可用月份 {prior_month} 是否出现及市值变化判断。"
+        )
+
+    evidence_control_cols = st.columns([0.28, 0.72])
+    with evidence_control_cols[0]:
+        manager_split_choice = st.radio(
+            "投资经理口径",
+            ["拆分投资经理", "不拆分投资经理"],
+            horizontal=True,
+            key="资产证据投资经理口径",
+        )
+    split_evidence_manager = manager_split_choice == "拆分投资经理"
+    evidence_options = asset_evidence_sort_options(comparison_mode)
+
+    if comparison_mode == "年初以来":
         evidence = asset_evidence_year_open(
             data,
             current_month,
@@ -3144,12 +3163,9 @@ def main() -> None:
             selected_asset_class,
             selected_manager,
             prior_month=prior_month,
+            split_manager=split_evidence_manager,
         )
-        evidence_options = asset_evidence_sort_options(comparison_mode)
     else:
-        show_block_note(
-            f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按报告月份和上一可用月份 {prior_month} 是否出现及市值变化判断。"
-        )
         evidence = asset_evidence(
             data,
             current_month,
@@ -3157,15 +3173,21 @@ def main() -> None:
             evidence_account,
             selected_asset_class,
             selected_manager,
+            split_manager=split_evidence_manager,
         )
-        evidence_options = asset_evidence_sort_options(comparison_mode)
-    sort_choice = st.radio(
-        "资产证据视角",
-        evidence_options,
-        horizontal=True,
-    )
+    with evidence_control_cols[1]:
+        sort_choice = st.radio(
+            "资产证据视角",
+            evidence_options,
+            horizontal=True,
+        )
     evidence = sort_asset_evidence(evidence, sort_choice, comparison_mode)
     display_evidence = evidence if sort_choice == ALL else evidence.head(500)
+    manager_evidence_columns = (
+        ["manager"]
+        if split_evidence_manager
+        else ["current_holding_managers", "ever_holding_managers"]
+    )
 
     st.dataframe(
         format_table(
@@ -3173,7 +3195,7 @@ def main() -> None:
                 [
                     "change_type",
                     "asset_name",
-                    "manager",
+                    *manager_evidence_columns,
                     *asset_evidence_value_columns(comparison_mode),
                     "asset_code",
                     "trade_code",

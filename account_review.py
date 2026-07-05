@@ -146,8 +146,14 @@ def filter_current(
     return subset
 
 
-def _asset_evidence_group_columns(extra_group_cols: list[str] | None = None) -> list[str]:
-    base_cols = ["asset_key", "asset_name", "asset_code", "trade_code", "account_bucket", "asset_class", "manager"]
+def _asset_evidence_group_columns(
+    extra_group_cols: list[str] | None = None,
+    split_manager: bool = True,
+) -> list[str]:
+    base_cols = ["asset_name", "asset_code", "trade_code", "account_bucket", "asset_class"]
+    if split_manager:
+        base_cols.insert(0, "asset_key")
+        base_cols.append("manager")
     cols: list[str] = []
     for column in (extra_group_cols or []) + base_cols:
         if column not in cols:
@@ -190,6 +196,84 @@ def _add_evidence_return_columns(evidence: pd.DataFrame) -> pd.DataFrame:
     return evidence
 
 
+def _join_manager_labels(series: pd.Series) -> str:
+    labels = sorted(
+        {
+            str(value).strip()
+            for value in series
+            if str(value).strip() not in ["", "nan", "None"]
+        }
+    )
+    return "、".join(labels)
+
+
+def _manager_list_by_group(
+    data: pd.DataFrame,
+    group_cols: list[str],
+    label_col: str,
+    month: str | None = None,
+    current_holding_only: bool = False,
+) -> pd.DataFrame:
+    if data.empty:
+        return pd.DataFrame(columns=group_cols + [label_col])
+
+    working = _ensure_group_columns(data, group_cols + ["manager"])
+    working = _ensure_numeric_columns(working, ["full_market_value", "market_value_year_open"])
+    if month:
+        working = working[working["snapshot_month"] == month]
+
+    active = working["full_market_value"].abs() > 0.0001
+    if not current_holding_only:
+        active = active | (working["market_value_year_open"].abs() > 0.0001)
+    working = working[active]
+    if working.empty:
+        return pd.DataFrame(columns=group_cols + [label_col])
+
+    return (
+        working.groupby(group_cols, dropna=False)
+        .agg(**{label_col: ("manager", _join_manager_labels)})
+        .reset_index()
+    )
+
+
+def _filter_to_manager_groups(
+    evidence: pd.DataFrame,
+    data: pd.DataFrame,
+    group_cols: list[str],
+    manager: str | None,
+) -> pd.DataFrame:
+    if not manager or manager == "全部":
+        return evidence
+
+    working = _ensure_group_columns(data, group_cols + ["manager"])
+    groups = working[working["manager"] == manager][group_cols].drop_duplicates()
+    if groups.empty:
+        return evidence.iloc[0:0].copy()
+    return evidence.merge(groups, on=group_cols, how="inner")
+
+
+def _add_manager_list_columns(
+    evidence: pd.DataFrame,
+    data: pd.DataFrame,
+    group_cols: list[str],
+    current_month: str,
+) -> pd.DataFrame:
+    current_managers = _manager_list_by_group(
+        data,
+        group_cols,
+        "current_holding_managers",
+        month=current_month,
+        current_holding_only=True,
+    )
+    ever_managers = _manager_list_by_group(data, group_cols, "ever_holding_managers")
+
+    merged = evidence.merge(current_managers, on=group_cols, how="left")
+    merged = merged.merge(ever_managers, on=group_cols, how="left")
+    for column in ["current_holding_managers", "ever_holding_managers"]:
+        merged[column] = merged[column].fillna("")
+    return merged
+
+
 def asset_evidence(
     data: pd.DataFrame,
     current_month: str,
@@ -198,16 +282,17 @@ def asset_evidence(
     asset_class: str | None = None,
     manager: str | None = None,
     extra_group_cols: list[str] | None = None,
+    split_manager: bool = True,
 ) -> pd.DataFrame:
     subset = data.copy()
     if account and account != "全部":
         subset = subset[subset["account_bucket"] == account]
     if asset_class and asset_class != "全部":
         subset = subset[subset["asset_class"] == asset_class]
-    if manager and manager != "全部":
+    if split_manager and manager and manager != "全部":
         subset = subset[subset["manager"] == manager]
 
-    cols = _asset_evidence_group_columns(extra_group_cols)
+    cols = _asset_evidence_group_columns(extra_group_cols, split_manager=split_manager)
     subset = _ensure_group_columns(subset, cols)
     subset = _ensure_numeric_columns(
         subset,
@@ -262,6 +347,9 @@ def asset_evidence(
     merged["monthly_position_flow_delta"] = (
         merged["full_market_value_delta"] - merged["comprehensive_income_mtd_current"]
     )
+    if not split_manager:
+        merged = _filter_to_manager_groups(merged, subset, cols, manager)
+        merged = _add_manager_list_columns(merged, subset, cols, current_month)
     merged = _add_evidence_return_columns(merged)
     merged["change_type"] = "存续"
     merged.loc[(merged["source_rows_prior"] == 0) & (merged["source_rows_current"] > 0), "change_type"] = "新增"
@@ -285,16 +373,17 @@ def asset_evidence_year_open(
     manager: str | None = None,
     extra_group_cols: list[str] | None = None,
     prior_month: str | None = None,
+    split_manager: bool = True,
 ) -> pd.DataFrame:
     subset = data.copy()
     if account and account != "全部":
         subset = subset[subset["account_bucket"] == account]
     if asset_class and asset_class != "全部":
         subset = subset[subset["asset_class"] == asset_class]
-    if manager and manager != "全部":
+    if split_manager and manager and manager != "全部":
         subset = subset[subset["manager"] == manager]
 
-    cols = _asset_evidence_group_columns(extra_group_cols)
+    cols = _asset_evidence_group_columns(extra_group_cols, split_manager=split_manager)
     subset = _ensure_group_columns(subset, cols)
     subset = _ensure_numeric_columns(
         subset,
@@ -353,6 +442,9 @@ def asset_evidence_year_open(
             - evidence["full_market_value_month_prior"]
             - evidence["comprehensive_income_latest_month"]
         )
+    if not split_manager:
+        evidence = _filter_to_manager_groups(evidence, subset, cols, manager)
+        evidence = _add_manager_list_columns(evidence, subset, cols, current_month)
     evidence = _add_evidence_return_columns(evidence)
     evidence["change_type"] = "较年初持平"
     evidence.loc[
