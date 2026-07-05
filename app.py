@@ -1795,12 +1795,12 @@ def render_asset_return_completion(data: pd.DataFrame, current_month: str) -> No
 
 def asset_evidence_sort_options(comparison_mode: str) -> list[str]:
     if comparison_mode == "年初以来":
-        return ["收益贡献", "收益拖累", "规模增加", "规模减少", "年初持仓变化"]
-    return ["收益贡献", "收益拖累", "规模增加", "规模减少", "新增退出"]
+        return [ALL, "收益贡献", "收益拖累", "规模增加", "规模减少", "年初持仓变化"]
+    return [ALL, "收益贡献", "收益拖累", "规模增加", "规模减少", "新增退出"]
 
 
 def sort_asset_evidence(evidence: pd.DataFrame, sort_choice: str, comparison_mode: str) -> pd.DataFrame:
-    if evidence.empty:
+    if evidence.empty or sort_choice == ALL:
         return evidence
     if sort_choice == "收益贡献":
         return evidence.sort_values("comprehensive_income_mtd_current", ascending=False)
