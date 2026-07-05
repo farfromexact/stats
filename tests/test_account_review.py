@@ -102,6 +102,53 @@ class AssetEvidenceTest(unittest.TestCase):
         self.assertEqual(row["avg_capital_mtd_current"], 2.0)
         self.assertAlmostEqual(row["finance_return_mtd"], 0.01)
         self.assertAlmostEqual(row["comprehensive_return_mtd"], 0.025)
+        self.assertAlmostEqual(row["monthly_position_flow_delta"], 0.35)
+
+    def test_year_open_asset_evidence_splits_income_and_position_flow(self):
+        data = pd.DataFrame(
+            [
+                {
+                    "snapshot_month": "2026-05",
+                    "asset_key": "asset-a",
+                    "asset_name": "测试股票",
+                    "asset_code": "000001.STK.SZ",
+                    "trade_code": "000001SZ",
+                    "account_bucket": "传统",
+                    "asset_class": "股票",
+                    "manager": "测试经理",
+                    "full_market_value": 90.0,
+                    "market_value_year_open": 100.0,
+                    "avg_capital_ytd": 100.0,
+                    "finance_income_ytd": 4.0,
+                    "comprehensive_income_ytd": 5.0,
+                    "comprehensive_income_mtd": 1.0,
+                },
+                {
+                    "snapshot_month": "2026-06",
+                    "asset_key": "asset-a",
+                    "asset_name": "测试股票",
+                    "asset_code": "000001.STK.SZ",
+                    "trade_code": "000001SZ",
+                    "account_bucket": "传统",
+                    "asset_class": "股票",
+                    "manager": "测试经理",
+                    "full_market_value": 120.0,
+                    "market_value_year_open": 100.0,
+                    "avg_capital_ytd": 100.0,
+                    "finance_income_ytd": 7.0,
+                    "comprehensive_income_ytd": 8.0,
+                    "comprehensive_income_mtd": 3.0,
+                },
+            ]
+        )
+
+        evidence = asset_evidence_year_open(data, "2026-06", prior_month="2026-05")
+
+        self.assertEqual(len(evidence), 1)
+        row = evidence.iloc[0]
+        self.assertAlmostEqual(row["full_market_value_delta"], 20.0)
+        self.assertAlmostEqual(row["ytd_position_flow_delta"], 12.0)
+        self.assertAlmostEqual(row["monthly_position_flow_delta"], 27.0)
 
 
 if __name__ == "__main__":

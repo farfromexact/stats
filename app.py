@@ -522,6 +522,8 @@ DISPLAY_NAMES = {
     "full_market_value_prior": "上月市值(亿)",
     "full_market_value_delta": "较上月变化(亿)",
     "net_full_market_value_delta": "扣收益后较上月规模变化(亿)",
+    "ytd_position_flow_delta": "扣综合收益后较年初加减仓(亿)",
+    "monthly_position_flow_delta": "扣本月综合收益后较上月加减仓(亿)",
     "finance_income_mtd_current": "本月财务收益(亿)",
     "comprehensive_income_mtd_current": "本月综合收益(亿)",
     "finance_income_mtd_delta": "财务收益变化(亿)",
@@ -587,6 +589,8 @@ AMOUNT_COLUMNS = {
     "full_market_value_prior",
     "full_market_value_delta",
     "net_full_market_value_delta",
+    "ytd_position_flow_delta",
+    "monthly_position_flow_delta",
     "finance_income_mtd_current",
     "comprehensive_income_mtd_current",
     "finance_income_mtd_delta",
@@ -1829,6 +1833,33 @@ def sort_asset_evidence(evidence: pd.DataFrame, sort_choice: str, comparison_mod
     )
 
 
+def asset_evidence_value_columns(comparison_mode: str) -> list[str]:
+    columns = [
+        "full_market_value_prior",
+        "full_market_value_current",
+        "avg_capital_mtd_current",
+        "finance_income_mtd_current",
+        "comprehensive_income_mtd_current",
+    ]
+    if comparison_mode == "年初以来":
+        columns.extend(
+            [
+                "ytd_position_flow_delta",
+                "full_market_value_delta",
+                "monthly_position_flow_delta",
+            ]
+        )
+    else:
+        columns.extend(
+            [
+                "full_market_value_delta",
+                "monthly_position_flow_delta",
+            ]
+        )
+    columns.extend(["finance_return_mtd", "comprehensive_return_mtd"])
+    return columns
+
+
 def render_outsourced_equity_evidence(
     data: pd.DataFrame,
     current_month: str,
@@ -1852,6 +1883,7 @@ def render_outsourced_equity_evidence(
             outsourced_equity,
             current_month,
             extra_group_cols=group_cols,
+            prior_month=prior_month,
         )
     else:
         evidence = asset_evidence(
@@ -1902,14 +1934,7 @@ def render_outsourced_equity_evidence(
                     "account_bucket",
                     "asset_class",
                     "manager",
-                    "full_market_value_current",
-                    "full_market_value_prior",
-                    "full_market_value_delta",
-                    "finance_income_mtd_current",
-                    "comprehensive_income_mtd_current",
-                    "avg_capital_mtd_current",
-                    "finance_return_mtd",
-                    "comprehensive_return_mtd",
+                    *asset_evidence_value_columns(comparison_mode),
                     "source_rows_current",
                     "source_rows_prior",
                 ]
@@ -3118,6 +3143,7 @@ def main() -> None:
             evidence_account,
             selected_asset_class,
             selected_manager,
+            prior_month=prior_month,
         )
         evidence_options = asset_evidence_sort_options(comparison_mode)
     else:
@@ -3148,14 +3174,7 @@ def main() -> None:
                     "change_type",
                     "asset_name",
                     "manager",
-                    "full_market_value_prior",
-                    "full_market_value_current",
-                    "avg_capital_mtd_current",
-                    "finance_income_mtd_current",
-                    "comprehensive_income_mtd_current",
-                    "full_market_value_delta",
-                    "finance_return_mtd",
-                    "comprehensive_return_mtd",
+                    *asset_evidence_value_columns(comparison_mode),
                     "asset_code",
                     "trade_code",
                     "account_bucket",

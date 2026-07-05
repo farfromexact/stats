@@ -259,6 +259,9 @@ def asset_evidence(
     merged["full_market_value_delta"] = (
         merged["full_market_value_current"] - merged["full_market_value_prior"]
     )
+    merged["monthly_position_flow_delta"] = (
+        merged["full_market_value_delta"] - merged["comprehensive_income_mtd_current"]
+    )
     merged = _add_evidence_return_columns(merged)
     merged["change_type"] = "存续"
     merged.loc[(merged["source_rows_prior"] == 0) & (merged["source_rows_current"] > 0), "change_type"] = "新增"
@@ -281,8 +284,9 @@ def asset_evidence_year_open(
     asset_class: str | None = None,
     manager: str | None = None,
     extra_group_cols: list[str] | None = None,
+    prior_month: str | None = None,
 ) -> pd.DataFrame:
-    subset = data[data["snapshot_month"] == current_month].copy()
+    subset = data.copy()
     if account and account != "全部":
         subset = subset[subset["account_bucket"] == account]
     if asset_class and asset_class != "全部":
@@ -298,26 +302,57 @@ def asset_evidence_year_open(
             "full_market_value",
             "market_value_year_open",
             "avg_capital_ytd",
+            "comprehensive_income_mtd",
             "finance_income_ytd",
             "comprehensive_income_ytd",
         ],
     )
     evidence = (
-        subset.groupby(cols, dropna=False)
+        subset[subset["snapshot_month"] == current_month]
+        .groupby(cols, dropna=False)
         .agg(
             full_market_value_current=("full_market_value", "sum"),
             full_market_value_prior=("market_value_year_open", "sum"),
             avg_capital_mtd_current=("avg_capital_ytd", "sum"),
             finance_income_mtd_current=("finance_income_ytd", "sum"),
             comprehensive_income_mtd_current=("comprehensive_income_ytd", "sum"),
+            comprehensive_income_latest_month=("comprehensive_income_mtd", "sum"),
             source_rows_current=("asset_name", "size"),
         )
         .reset_index()
     )
+
+    if prior_month:
+        month_prior = (
+            subset[subset["snapshot_month"] == prior_month]
+            .groupby(cols, dropna=False)
+            .agg(
+                full_market_value_month_prior=("full_market_value", "sum"),
+                source_rows_month_prior=("asset_name", "size"),
+            )
+            .reset_index()
+        )
+        evidence = evidence.merge(month_prior, on=cols, how="left")
+        evidence["full_market_value_month_prior"] = evidence["full_market_value_month_prior"].fillna(0.0)
+        evidence["source_rows_month_prior"] = evidence["source_rows_month_prior"].fillna(0.0)
+    else:
+        evidence["full_market_value_month_prior"] = None
+        evidence["source_rows_month_prior"] = None
+
     evidence["source_rows_prior"] = None
     evidence["full_market_value_delta"] = (
         evidence["full_market_value_current"] - evidence["full_market_value_prior"]
     )
+    evidence["ytd_position_flow_delta"] = (
+        evidence["full_market_value_delta"] - evidence["comprehensive_income_mtd_current"]
+    )
+    evidence["monthly_position_flow_delta"] = None
+    if prior_month:
+        evidence["monthly_position_flow_delta"] = (
+            evidence["full_market_value_current"]
+            - evidence["full_market_value_month_prior"]
+            - evidence["comprehensive_income_latest_month"]
+        )
     evidence = _add_evidence_return_columns(evidence)
     evidence["change_type"] = "较年初持平"
     evidence.loc[
