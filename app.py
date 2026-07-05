@@ -1800,8 +1800,10 @@ def asset_evidence_sort_options(comparison_mode: str) -> list[str]:
 
 
 def sort_asset_evidence(evidence: pd.DataFrame, sort_choice: str, comparison_mode: str) -> pd.DataFrame:
-    if evidence.empty or sort_choice == ALL:
+    if evidence.empty:
         return evidence
+    if sort_choice == ALL:
+        return evidence.sort_values("full_market_value_current", ascending=False)
     if sort_choice == "收益贡献":
         return evidence.sort_values("comprehensive_income_mtd_current", ascending=False)
     if sort_choice == "收益拖累":
@@ -1883,12 +1885,13 @@ def render_outsourced_equity_evidence(
         return
 
     evidence = sort_asset_evidence(evidence, sort_choice, comparison_mode)
+    display_evidence = evidence if sort_choice == ALL else evidence.head(500)
     current_value = float(pd.to_numeric(evidence["full_market_value_current"], errors="coerce").fillna(0.0).sum())
     current_rows = int(pd.to_numeric(evidence["source_rows_current"], errors="coerce").fillna(0).sum())
     st.caption(f"当前筛选后委外权益持仓市值 {amount(current_value)}，共 {current_rows:,} 条源记录。")
     st.dataframe(
         format_table(
-            evidence[
+            display_evidence[
                 [
                     "strategy_book_display_label",
                     "outsourced_equity_holding_type",
@@ -1910,7 +1913,7 @@ def render_outsourced_equity_evidence(
                     "source_rows_current",
                     "source_rows_prior",
                 ]
-            ].head(500),
+            ],
             comparison_mode=comparison_mode,
         ),
         width="stretch",
@@ -3136,10 +3139,11 @@ def main() -> None:
         horizontal=True,
     )
     evidence = sort_asset_evidence(evidence, sort_choice, comparison_mode)
+    display_evidence = evidence if sort_choice == ALL else evidence.head(500)
 
     st.dataframe(
         format_table(
-            evidence[
+            display_evidence[
                 [
                     "change_type",
                     "asset_name",
@@ -3159,7 +3163,7 @@ def main() -> None:
                     "source_rows_current",
                     "source_rows_prior",
                 ]
-            ].head(500),
+            ],
             comparison_mode=comparison_mode,
         ),
         width="stretch",
