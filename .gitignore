@@ -7,3 +7,4 @@ test_tmp/
 ~$*.xlsx
 .streamlit_boot_log.txt
 output/
+data/monthly_snapshots/source_cache_extracts/

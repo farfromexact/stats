@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover - compatibility with older Streamlit
 import account_review as account_review_module
 import strategy_books as strategy_books_module
 from config import DATA_DIR
-from portfolio_data import available_months, load_snapshots
+from portfolio_data import available_months, discover_snapshot_files, load_snapshots
 
 account_review_module = importlib.reload(account_review_module)
 strategy_books_module = importlib.reload(strategy_books_module)
@@ -25,6 +25,8 @@ strategy_books_module = importlib.reload(strategy_books_module)
 asset_evidence = account_review_module.asset_evidence
 asset_evidence_year_open = account_review_module.asset_evidence_year_open
 comparison_summary = account_review_module.comparison_summary
+assign_strategy_book_columns = strategy_books_module.assign_strategy_book_columns
+STRATEGY_CLASSIFICATION_VERSION = strategy_books_module.STRATEGY_CLASSIFICATION_VERSION
 EXTERNAL_STRATEGY_BOOK_ORDER = strategy_books_module.EXTERNAL_STRATEGY_BOOK_ORDER
 OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER = strategy_books_module.OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER
 STRATEGY_BOOK_LABEL_ORDER = strategy_books_module.STRATEGY_BOOK_LABEL_ORDER
@@ -36,7 +38,7 @@ strategy_book_summary = strategy_books_module.strategy_book_summary
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
-DATA_SCHEMA_VERSION = "2026-07-02-snapshot-20260630"
+DATA_SCHEMA_VERSION = "2026-07-18-preclassified-strategy-v1"
 ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
 LOCAL_FULL_APP_MARKER_PATH = Path(__file__).resolve().parent / ".streamlit" / "local_full_app"
 MAINTENANCE_MESSAGE = "多事之秋，我们秋天再见"
@@ -640,9 +642,32 @@ RUNTIME_COLUMN_DEFAULTS = {
 }
 
 
-@st.cache_data(show_spinner="正在读取月度宽表...")
-def cached_load(data_dir: str, schema_version: str):
-    return load_snapshots(Path(data_dir))
+def data_source_signature(data_dir: Path) -> tuple[tuple[str, int, int], ...]:
+    parquet_dir = data_dir.parent / "snapshot_parquet"
+    candidates = [
+        *discover_snapshot_files(data_dir),
+        *parquet_dir.glob("*.parquet"),
+        parquet_dir / "manifest.json",
+    ]
+    signature: list[tuple[str, int, int]] = []
+    for path in sorted({candidate for candidate in candidates if candidate.exists()}):
+        stat = path.stat()
+        signature.append((str(path.relative_to(data_dir.parent)), stat.st_size, stat.st_mtime_ns))
+    return tuple(signature)
+
+
+@st.cache_data(show_spinner="正在读取并预处理月度宽表...")
+def cached_load(
+    data_dir: str,
+    schema_version: str,
+    classification_version: str,
+    source_signature: tuple[tuple[str, int, int], ...],
+):
+    del schema_version, classification_version, source_signature
+    data, validation, errors = load_snapshots(Path(data_dir))
+    if errors or data.empty:
+        return data, validation, errors
+    return assign_strategy_book_columns(data), validation, errors
 
 
 def missing_runtime_columns(data: pd.DataFrame) -> list[str]:
@@ -968,6 +993,13 @@ def include_focus_asset_labels(
 
 def show_block_note(text: str) -> None:
     st.caption(f"口径说明：{text}")
+
+
+def reset_boolean_state_on_context(state_key: str, context: tuple[object, ...]) -> None:
+    context_key = f"_{state_key}_context"
+    if st.session_state.get(context_key) != context:
+        st.session_state[context_key] = context
+        st.session_state[state_key] = False
 
 
 def income_chart_config(comparison_mode: str, title_prefix: str, title_suffix: str) -> tuple[str, str, str]:
@@ -1872,7 +1904,9 @@ def render_outsourced_equity_evidence(
         "现金、存款、货币基金、债券、固收基金、应收、费用和轧差项不进入本表。"
     )
 
-    outsourced_equity = outsourced_equity_holding_slice(data)
+    relevant_months = {current_month, prior_month}
+    relevant_data = data[data["snapshot_month"].isin(relevant_months)]
+    outsourced_equity = outsourced_equity_holding_slice(relevant_data)
     if outsourced_equity.empty:
         st.info("当前没有可展示的委外权益持仓。")
         return
@@ -1917,7 +1951,25 @@ def render_outsourced_equity_evidence(
         return
 
     evidence = sort_asset_evidence(evidence, sort_choice, comparison_mode)
-    display_evidence = evidence if sort_choice == ALL else evidence.head(500)
+    show_all_evidence = False
+    if len(evidence) > 500:
+        show_all_key = "加载全部委外权益明细"
+        reset_boolean_state_on_context(
+            show_all_key,
+            (
+                current_month,
+                prior_month,
+                comparison_mode,
+                selected_company,
+                selected_equity_type,
+                sort_choice,
+            ),
+        )
+        show_all_evidence = st.toggle(
+            f"加载全部委外权益明细（{len(evidence):,} 条）",
+            key=show_all_key,
+        )
+    display_evidence = evidence if show_all_evidence else evidence.head(500)
     current_value = float(pd.to_numeric(evidence["full_market_value_current"], errors="coerce").fillna(0.0).sum())
     current_rows = int(pd.to_numeric(evidence["source_rows_current"], errors="coerce").fillna(0).sum())
     st.caption(f"当前筛选后委外权益持仓市值 {amount(current_value)}，共 {current_rows:,} 条源记录。")
@@ -2622,11 +2674,17 @@ def main() -> None:
     st.title("组合管理账户复盘")
     st.caption("看组合规模、收益贡献、数据质量，并追到资产证据。")
 
-    data, validation, errors = cached_load(str(DATA_DIR), DATA_SCHEMA_VERSION)
+    source_signature = data_source_signature(DATA_DIR)
+    data, validation, errors = cached_load(
+        str(DATA_DIR),
+        DATA_SCHEMA_VERSION,
+        STRATEGY_CLASSIFICATION_VERSION,
+        source_signature,
+    )
     runtime_missing_columns = missing_runtime_columns(data)
     if runtime_missing_columns and not st.session_state.get("runtime_schema_cache_refresh_attempted"):
         st.session_state["runtime_schema_cache_refresh_attempted"] = True
-        st.cache_data.clear()
+        cached_load.clear()
         st.rerun()
     data, runtime_missing_columns = ensure_runtime_columns(data)
     with st.sidebar:
@@ -2634,7 +2692,7 @@ def main() -> None:
         with st.expander("数据源", expanded=False):
             st.write(f"数据目录：`{DATA_DIR}`")
         if st.button("刷新数据"):
-            st.cache_data.clear()
+            cached_load.clear()
             st.rerun()
         sidebar_nav()
 
@@ -2665,6 +2723,8 @@ def main() -> None:
         st.session_state["账户"] = ALL
         st.session_state["投资品种"] = ALL
         st.session_state["投资经理"] = ALL
+        st.session_state["加载全部资产证据"] = False
+        st.session_state["加载全部委外权益明细"] = False
         st.session_state["reset_filters"] = False
 
     with st.sidebar:
@@ -2859,7 +2919,9 @@ def main() -> None:
     st.subheader("委内/委外比较")
     show_block_note(
         "本模块复刻管理透视表口径：委内展示委托资管下的固收配置盘、固收交易盘、非标、权益配置盘、权益交易盘；"
-        "委外并列展示人保/泰康固收、富国/华泰权益，以及太平资产香港、太保投资香港、国寿富兰克林。"
+        "委外并列展示人保/泰康/中信建投/中邮证券固收，富国/华泰/华夏基金/国泰海通/大成基金/广发基金权益，"
+        "以及太平资产香港、太保投资香港、国寿富兰克林。"
+        "单一委外计划按月在顶层汇总行与底层持仓中选择有规模的一层，避免重复计算；"
         "指定委外账户按账户全量纳入，包含现金、应收、费用等调节项；"
         "富国顶层产品行只作为对账提示，避免重复计算底层持仓；"
         "卡片胶囊数字为综合收益率。"
@@ -3165,7 +3227,29 @@ def main() -> None:
         horizontal=True,
     )
     evidence = sort_asset_evidence(evidence, sort_choice, comparison_mode)
-    display_evidence = evidence if sort_choice == ALL else evidence.head(500)
+    show_all_evidence = False
+    if len(evidence) > 500:
+        show_all_key = "加载全部资产证据"
+        reset_boolean_state_on_context(
+            show_all_key,
+            (
+                current_month,
+                prior_month,
+                comparison_mode,
+                manager_view_mode,
+                evidence_account,
+                selected_asset_class,
+                selected_manager,
+                sort_choice,
+            ),
+        )
+        show_all_evidence = st.toggle(
+            f"加载全部资产证据（{len(evidence):,} 条）",
+            key=show_all_key,
+        )
+        if not show_all_evidence:
+            st.caption("为提升刷新速度，默认展示当前排序下前 500 条；汇总指标仍按全部资产计算。")
+    display_evidence = evidence if show_all_evidence else evidence.head(500)
 
     st.dataframe(
         format_table(

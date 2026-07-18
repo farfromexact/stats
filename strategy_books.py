@@ -7,6 +7,7 @@ import pandas as pd
 INTERNAL_MANDATE = "委托资管"
 RETURN_BASE_THRESHOLD = 0.0001
 EXCLUDED_STRATEGY_BOOK = "流动性/其他未纳入五类"
+STRATEGY_CLASSIFICATION_VERSION = "2026-07-18-v1"
 
 INTERNAL_STRATEGY_BOOK_ORDER = [
     "固收-配置盘",
@@ -18,8 +19,14 @@ INTERNAL_STRATEGY_BOOK_ORDER = [
 EXTERNAL_STRATEGY_BOOK_ORDER = [
     "人保固收",
     "泰康固收",
+    "中信建投固收",
+    "中邮证券固收",
     "富国权益",
     "华泰权益",
+    "华夏基金权益",
+    "国泰海通权益",
+    "大成基金权益",
+    "广发基金权益",
     "太平资产香港",
     "太保投资香港",
     "国寿富兰克林",
@@ -94,8 +101,38 @@ OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS = {
     "委托太保投资香港": "太保投资香港",
     "委托国寿富兰克林": "国寿富兰克林",
 }
-OUTSOURCED_FULL_ACCOUNT_BOOKS = {
+OUTSOURCED_SINGLE_PLAN_BOOKS = {
+    "中信建投单一计划": ("中信建投固收", "中信建投"),
+    "中邮证券单一计划": ("中邮证券固收", "中邮证券"),
+    "华夏基金单一计划": ("华夏基金权益", "华夏基金"),
+    "国泰海通单一计划": ("国泰海通权益", "国泰海通"),
+    "大成基金单一计划": ("大成基金权益", "大成基金"),
+    "富国基金单一计划": ("富国权益", "富国基金"),
+    "广发基金单一计划": ("广发基金权益", "广发基金"),
+}
+OUTSOURCED_SINGLE_PLAN_FUND_BOOKS = {
+    keyword: strategy_book
+    for strategy_book, keyword in OUTSOURCED_SINGLE_PLAN_BOOKS.values()
+}
+OUTSOURCED_FIXED_BOOKS = {
+    "人保固收",
+    "泰康固收",
+    "中信建投固收",
+    "中邮证券固收",
+}
+OUTSOURCED_EQUITY_BOOKS = {
     "富国权益",
+    "华泰权益",
+    "华夏基金权益",
+    "国泰海通权益",
+    "大成基金权益",
+    "广发基金权益",
+    "太平资产香港",
+    "太保投资香港",
+    "国寿富兰克林",
+}
+OUTSOURCED_FULL_ACCOUNT_BOOKS = {
+    *OUTSOURCED_EQUITY_BOOKS,
     *OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS.values(),
 }
 CASH_LIQUIDITY_CLASSES = {
@@ -149,6 +186,14 @@ RUNTIME_TEXT_COLUMNS = [
     "fund_book_name",
     "group_book_name",
 ]
+STRATEGY_BOOK_OUTPUT_COLUMNS = [
+    "strategy_book",
+    "strategy_book_scope",
+    "strategy_book_display_label",
+    "strategy_book_section",
+    "strategy_book_item",
+    "strategy_book_exclusion_reason",
+]
 
 
 def _text_value(row: pd.Series | dict, column: str) -> str:
@@ -184,8 +229,11 @@ def classify_strategy_book(row: pd.Series | dict) -> str:
         return "人保固收"
     if mandate_type == "委托泰康" and asset_class in OUTSOURCED_FIXED_CLASSES:
         return "泰康固收"
-    if "富国" in fund_book_name:
-        return "富国权益"
+    if mandate_type in OUTSOURCED_SINGLE_PLAN_BOOKS:
+        return OUTSOURCED_SINGLE_PLAN_BOOKS[mandate_type][0]
+    for keyword, strategy_book in OUTSOURCED_SINGLE_PLAN_FUND_BOOKS.items():
+        if keyword in fund_book_name:
+            return strategy_book
     if mandate_type in OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS:
         return OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS[mandate_type]
 
@@ -209,7 +257,7 @@ def strategy_book_section(row: pd.Series | dict) -> str:
     asset_class = _text_value(row, "asset_class")
     asset_class_level_1 = _text_value(row, "asset_class_level_1")
 
-    if strategy_book in {"固收-配置盘", "固收-交易盘", "非标", "人保固收", "泰康固收"}:
+    if strategy_book in {"固收-配置盘", "固收-交易盘", "非标"} | OUTSOURCED_FIXED_BOOKS:
         if asset_class == "存款":
             return "存款"
         if asset_class in {"同业存单", "政府债", "金融债", "企业债", "资产支持证券", "持有型不动产ABS"}:
@@ -221,6 +269,7 @@ def strategy_book_section(row: pd.Series | dict) -> str:
             "债权计划",
             "资产支持计划",
             "公募REITS",
+            "单一资产管理计划（固收类产品）",
         }:
             return "基金"
 
@@ -250,7 +299,7 @@ def strategy_book_item(row: pd.Series | dict) -> str:
         return "企业债"
     if asset_class in NONSTANDARD_CLASSES:
         return "非标"
-    if asset_class in {"债券型基金", "固收类保险资管产品"}:
+    if asset_class in {"债券型基金", "固收类保险资管产品", "单一资产管理计划（固收类产品）"}:
         return "固收类基金及产品"
     if asset_class in {
         "股票型基金",
@@ -272,9 +321,6 @@ def exclusion_reason(row: pd.Series | dict) -> str:
     mandate_type = _text_value(row, "mandate_type")
     fund_book_name = _text_value(row, "fund_book_name")
 
-    if mandate_type == "富国基金单一计划" and "富国" not in fund_book_name:
-        return "富国顶层产品汇总行，已排除以避免重复计算底层持仓"
-
     if (
         asset_class in PRIVATE_EQUITY_REAL_ESTATE_CLASSES
         or "股权" in asset_class
@@ -290,10 +336,62 @@ def exclusion_reason(row: pd.Series | dict) -> str:
     if (
         mandate_type not in {INTERNAL_MANDATE, "委托人保", "委托泰康"}
         and mandate_type not in OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS
-        and "富国" not in fund_book_name
+        and mandate_type not in OUTSOURCED_SINGLE_PLAN_BOOKS
+        and not any(keyword in fund_book_name for keyword in OUTSOURCED_SINGLE_PLAN_FUND_BOOKS)
     ):
         return "非委内/指定委外账户"
     return "不符合委内/委外比较分类规则"
+
+
+def _resolve_single_plan_hierarchy(working: pd.DataFrame) -> pd.Series:
+    """Choose one source level per month for each single outsourced plan."""
+    reasons = pd.Series("", index=working.index, dtype=object)
+    if working.empty:
+        return reasons
+
+    market_value = pd.to_numeric(
+        working.get("full_market_value", pd.Series(0.0, index=working.index)),
+        errors="coerce",
+    ).fillna(0.0)
+    if "snapshot_month" in working.columns:
+        month_key = working["snapshot_month"].fillna("").astype(str)
+    else:
+        month_key = pd.Series("__all__", index=working.index)
+
+    for mandate_type, (strategy_book, keyword) in OUTSOURCED_SINGLE_PLAN_BOOKS.items():
+        top_mask = working["mandate_type"].eq(mandate_type)
+        detail_mask = working["mandate_type"].eq("单一委外") & working["fund_book_name"].str.contains(
+            keyword,
+            regex=False,
+            na=False,
+        )
+        candidate_mask = top_mask | detail_mask
+        if not candidate_mask.any():
+            continue
+
+        for month in month_key[candidate_mask].drop_duplicates().tolist():
+            month_mask = month_key.eq(month)
+            top_index = working.index[top_mask & month_mask]
+            detail_index = working.index[detail_mask & month_mask]
+            if top_index.empty or detail_index.empty:
+                continue
+
+            top_value = float(market_value.loc[top_index].abs().sum())
+            detail_value = float(market_value.loc[detail_index].abs().sum())
+            if detail_value > RETURN_BASE_THRESHOLD:
+                excluded_index = top_index
+                reason = f"{strategy_book}顶层产品汇总行，已排除以避免重复计算底层持仓"
+            elif top_value > RETURN_BASE_THRESHOLD:
+                excluded_index = detail_index
+                reason = f"{strategy_book}底层持仓行规模为零，已改用顶层产品汇总行"
+            else:
+                excluded_index = top_index
+                reason = f"{strategy_book}顶层产品汇总行，已排除以避免重复计算底层持仓"
+
+            working.loc[excluded_index, "strategy_book"] = EXCLUDED_STRATEGY_BOOK
+            reasons.loc[excluded_index] = reason
+
+    return reasons
 
 
 def assign_strategy_book_columns(data: pd.DataFrame) -> pd.DataFrame:
@@ -313,12 +411,23 @@ def assign_strategy_book_columns(data: pd.DataFrame) -> pd.DataFrame:
         return working
 
     working["strategy_book"] = working.apply(classify_strategy_book, axis=1)
+    hierarchy_exclusion_reason = _resolve_single_plan_hierarchy(working)
     working["strategy_book_scope"] = working["strategy_book"].map(strategy_book_scope)
     working["strategy_book_display_label"] = working["strategy_book"].map(strategy_book_display_label)
     working["strategy_book_section"] = working.apply(strategy_book_section, axis=1)
     working["strategy_book_item"] = working.apply(strategy_book_item, axis=1)
     working["strategy_book_exclusion_reason"] = working.apply(exclusion_reason, axis=1)
+    hierarchy_excluded = hierarchy_exclusion_reason.ne("")
+    working.loc[hierarchy_excluded, "strategy_book_exclusion_reason"] = hierarchy_exclusion_reason.loc[
+        hierarchy_excluded
+    ]
     return working
+
+
+def ensure_strategy_book_columns(data: pd.DataFrame) -> pd.DataFrame:
+    if all(column in data.columns for column in STRATEGY_BOOK_OUTPUT_COLUMNS):
+        return data.copy()
+    return assign_strategy_book_columns(data)
 
 
 def outsourced_equity_holding_type(asset_class: object) -> str:
@@ -331,7 +440,7 @@ def outsourced_equity_holding_type(asset_class: object) -> str:
 
 
 def outsourced_equity_holding_slice(data: pd.DataFrame) -> pd.DataFrame:
-    working = assign_strategy_book_columns(data)
+    working = ensure_strategy_book_columns(data)
     working["outsourced_equity_holding_type"] = working["asset_class"].map(outsourced_equity_holding_type)
     if working.empty:
         return working
@@ -349,7 +458,7 @@ def _metric_columns(comparison_mode: str) -> tuple[str, str, str]:
 
 def _current_strategy_slice(data: pd.DataFrame, current_month: str) -> pd.DataFrame:
     working = data[data["snapshot_month"] == current_month].copy()
-    return assign_strategy_book_columns(working)
+    return ensure_strategy_book_columns(working)
 
 
 def _aggregate_current(frame: pd.DataFrame, group_cols: list[str], comparison_mode: str) -> pd.DataFrame:

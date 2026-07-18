@@ -6,7 +6,9 @@ from config import DATA_DIR
 from portfolio_data import load_snapshots
 from strategy_books import (
     EXCLUDED_STRATEGY_BOOK,
+    assign_strategy_book_columns,
     classify_strategy_book,
+    ensure_strategy_book_columns,
     exclusion_reason,
     outsourced_equity_holding_slice,
     outsourced_equity_holding_type,
@@ -31,6 +33,56 @@ def row(**overrides):
 
 
 class StrategyBookClassificationTest(unittest.TestCase):
+    def test_ensure_strategy_book_columns_reuses_complete_classification_without_aliasing(self):
+        source = pd.DataFrame(
+            [
+                row(
+                    mandate_type="委托人保",
+                    asset_class="企业债",
+                    asset_name="人保债",
+                    full_market_value=1.0,
+                )
+            ]
+        )
+        prepared = assign_strategy_book_columns(source)
+        reused = ensure_strategy_book_columns(prepared)
+
+        self.assertEqual(reused.loc[0, "strategy_book"], "人保固收")
+        self.assertIsNot(reused, prepared)
+        reused.loc[0, "strategy_book"] = "被修改"
+        self.assertEqual(prepared.loc[0, "strategy_book"], "人保固收")
+
+    def test_ensure_strategy_book_columns_rebuilds_when_any_output_column_is_missing(self):
+        source = pd.DataFrame(
+            [row(mandate_type="委托泰康", asset_class="政府债", asset_name="泰康债")]
+        )
+        prepared = assign_strategy_book_columns(source)
+
+        for missing_column in [
+            "strategy_book",
+            "strategy_book_scope",
+            "strategy_book_display_label",
+            "strategy_book_section",
+            "strategy_book_item",
+            "strategy_book_exclusion_reason",
+        ]:
+            with self.subTest(missing_column=missing_column):
+                rebuilt = ensure_strategy_book_columns(prepared.drop(columns=[missing_column]))
+                self.assertIn(missing_column, rebuilt.columns)
+                self.assertEqual(rebuilt.loc[0, "strategy_book"], "泰康固收")
+
+    def test_assign_strategy_book_columns_still_forces_reclassification(self):
+        source = pd.DataFrame(
+            [row(mandate_type="委托人保", asset_class="企业债", asset_name="委外债")]
+        )
+        prepared = assign_strategy_book_columns(source)
+        prepared.loc[0, "mandate_type"] = "委托泰康"
+        prepared.loc[0, "asset_class"] = "政府债"
+
+        rebuilt = assign_strategy_book_columns(prepared)
+
+        self.assertEqual(rebuilt.loc[0, "strategy_book"], "泰康固收")
+
     def test_fixed_income_books_and_exclusions(self):
         self.assertEqual(
             classify_strategy_book(
@@ -129,8 +181,22 @@ class StrategyBookClassificationTest(unittest.TestCase):
                     asset_class="单一资产管理计划（股票类产品）",
                 )
             ),
-            EXCLUDED_STRATEGY_BOOK,
+            "富国权益",
         )
+        expected_single_plans = {
+            "中信建投单一计划": "中信建投固收",
+            "中邮证券单一计划": "中邮证券固收",
+            "华夏基金单一计划": "华夏基金权益",
+            "国泰海通单一计划": "国泰海通权益",
+            "大成基金单一计划": "大成基金权益",
+            "广发基金单一计划": "广发基金权益",
+        }
+        for mandate_type, expected in expected_single_plans.items():
+            with self.subTest(mandate_type=mandate_type):
+                self.assertEqual(
+                    classify_strategy_book(row(mandate_type=mandate_type)),
+                    expected,
+                )
         self.assertEqual(
             classify_strategy_book(row(mandate_type="委托华泰", asset_class="股票")),
             "华泰权益",
@@ -213,16 +279,48 @@ class StrategyBookClassificationTest(unittest.TestCase):
             exclusion_reason(row(mandate_type="直投", asset_class="股权基金")),
             "股权/不动产直投，未纳入委内/委外比较核心分类",
         )
-        self.assertEqual(
-            exclusion_reason(
+    def test_single_plan_hierarchy_prefers_nonzero_market_value_level(self):
+        frame = pd.DataFrame(
+            [
                 row(
+                    snapshot_month="2026-06",
                     mandate_type="富国基金单一计划",
                     fund_book_name="分红邮储单一委外专户",
-                    asset_class="单一资产管理计划（股票类产品）",
-                )
-            ),
-            "富国顶层产品汇总行，已排除以避免重复计算底层持仓",
+                    full_market_value=5.46,
+                    asset_name="六月顶层",
+                ),
+                row(
+                    snapshot_month="2026-06",
+                    mandate_type="单一委外",
+                    fund_book_name="富国基金中邮1号单一资产管理计划",
+                    full_market_value=5.47,
+                    asset_name="六月底层",
+                ),
+                row(
+                    snapshot_month="2026-07",
+                    mandate_type="富国基金单一计划",
+                    fund_book_name="分红邮储单一委外专户",
+                    full_market_value=5.10,
+                    asset_name="七月顶层",
+                ),
+                row(
+                    snapshot_month="2026-07",
+                    mandate_type="单一委外",
+                    fund_book_name="富国基金中邮1号单一资产管理计划",
+                    full_market_value=0.0,
+                    asset_name="七月底层",
+                ),
+            ]
         )
+
+        result = assign_strategy_book_columns(frame).set_index("asset_name")
+
+        self.assertEqual(result.loc["六月底层", "strategy_book"], "富国权益")
+        self.assertEqual(result.loc["六月顶层", "strategy_book"], EXCLUDED_STRATEGY_BOOK)
+        self.assertEqual(result.loc["七月顶层", "strategy_book"], "富国权益")
+        self.assertEqual(result.loc["七月底层", "strategy_book"], EXCLUDED_STRATEGY_BOOK)
+        self.assertIn("避免重复计算底层持仓", result.loc["六月顶层", "strategy_book_exclusion_reason"])
+        self.assertIn("已改用顶层产品汇总行", result.loc["七月底层", "strategy_book_exclusion_reason"])
 
 
 class StrategyBookActualSnapshotTest(unittest.TestCase):
@@ -272,20 +370,44 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
             },
         )
 
+    def test_20260716_control_totals(self):
+        self.assert_control_totals(
+            "2026-07",
+            {
+                "人保固收": 126.847375,
+                "泰康固收": 44.433428,
+                "中信建投固收": 7.508443,
+                "中邮证券固收": 7.464992,
+                "富国权益": 5.105000,
+                "华泰权益": 5.393595,
+                "华夏基金权益": 4.927794,
+                "国泰海通权益": 4.725369,
+                "大成基金权益": 2.972434,
+                "广发基金权益": 2.859837,
+                "太平资产香港": 4.253103,
+                "太保投资香港": 6.620834,
+                "国寿富兰克林": 8.338286,
+            },
+        )
+
     def test_20260630_outsourced_equity_holding_total(self):
         data, _, errors = load_snapshots(DATA_DIR)
         self.assertEqual(errors, [])
         current = outsourced_equity_holding_slice(data[data["snapshot_month"] == "2026-06"])
 
-        self.assertAlmostEqual(float(current["full_market_value"].sum()), 14.580983, places=6)
+        self.assertAlmostEqual(float(current["full_market_value"].sum()), 14.884508, places=6)
         actual = dict(current.groupby("strategy_book")["full_market_value"].sum())
         self.assertAlmostEqual(actual["富国权益"], 4.666486, places=6)
         self.assertAlmostEqual(actual["华泰权益"], 5.402002, places=6)
+        self.assertAlmostEqual(actual["华夏基金权益"], 0.077609, places=6)
+        self.assertAlmostEqual(actual["国泰海通权益"], 0.103667, places=6)
+        self.assertAlmostEqual(actual["大成基金权益"], 0.058735, places=6)
+        self.assertAlmostEqual(actual["广发基金权益"], 0.063514, places=6)
         self.assertAlmostEqual(actual["太平资产香港"], 1.703431, places=6)
         self.assertAlmostEqual(actual["太保投资香港"], 2.809063, places=6)
         type_actual = dict(current.groupby("outsourced_equity_holding_type")["full_market_value"].sum())
-        self.assertAlmostEqual(type_actual["股票"], 6.943429, places=6)
-        self.assertAlmostEqual(type_actual["基金及产品"], 7.637554, places=6)
+        self.assertAlmostEqual(type_actual["股票"], 7.179149, places=6)
+        self.assertAlmostEqual(type_actual["基金及产品"], 7.705359, places=6)
 
 
 if __name__ == "__main__":
