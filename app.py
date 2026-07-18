@@ -17,7 +17,14 @@ except ImportError:  # pragma: no cover - compatibility with older Streamlit
 import account_review as account_review_module
 import strategy_books as strategy_books_module
 from config import DATA_DIR
-from portfolio_data import available_months, discover_snapshot_files, load_snapshots
+from portfolio_data import (
+    SNAPSHOT_STATUS_INTERIM,
+    SNAPSHOT_STATUS_OFFICIAL,
+    available_snapshots,
+    discover_snapshot_files,
+    load_snapshots,
+    snapshot_display_label,
+)
 
 account_review_module = importlib.reload(account_review_module)
 strategy_books_module = importlib.reload(strategy_books_module)
@@ -38,7 +45,7 @@ strategy_book_summary = strategy_books_module.strategy_book_summary
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
-DATA_SCHEMA_VERSION = "2026-07-18-preclassified-strategy-v1"
+DATA_SCHEMA_VERSION = "2026-07-18-snapshot-date-v2"
 ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
 LOCAL_FULL_APP_MARKER_PATH = Path(__file__).resolve().parent / ".streamlit" / "local_full_app"
 MAINTENANCE_MESSAGE = "多事之秋，我们秋天再见"
@@ -493,7 +500,9 @@ def require_login() -> None:
 
 
 DISPLAY_NAMES = {
+    "snapshot_date": "数据时点",
     "snapshot_month": "快照月份",
+    "snapshot_status": "快照状态",
     "source_file_name": "源文件名",
     "source_file_hash": "源文件哈希",
     "source_rows": "源表行数",
@@ -520,7 +529,7 @@ DISPLAY_NAMES = {
     "asset_code": "资产代码",
     "trade_code": "交易代码",
     "change_type": "变化类型",
-    "full_market_value_current": "报告月市值(亿)",
+    "full_market_value_current": "当前时点市值(亿)",
     "full_market_value_prior": "上月市值(亿)",
     "full_market_value_delta": "较上月变化(亿)",
     "net_full_market_value_delta": "扣收益后较上月规模变化(亿)",
@@ -656,6 +665,34 @@ def data_source_signature(data_dir: Path) -> tuple[tuple[str, int, int], ...]:
     return tuple(signature)
 
 
+def snapshot_slice(data: pd.DataFrame, snapshot_date: str) -> pd.DataFrame:
+    key = "snapshot_date" if "snapshot_date" in data.columns else "snapshot_month"
+    return data[data[key] == snapshot_date]
+
+
+def snapshot_status_map(data: pd.DataFrame) -> dict[str, str]:
+    if data.empty or not {"snapshot_date", "snapshot_status"}.issubset(data.columns):
+        return {}
+    metadata = data[["snapshot_date", "snapshot_status"]].drop_duplicates("snapshot_date")
+    return dict(zip(metadata["snapshot_date"].astype(str), metadata["snapshot_status"].astype(str)))
+
+
+def previous_official_snapshots(data: pd.DataFrame, current_snapshot: str) -> list[str]:
+    if data.empty or not {"snapshot_date", "snapshot_month", "snapshot_status"}.issubset(data.columns):
+        return []
+    current_rows = data[data["snapshot_date"].astype(str).eq(current_snapshot)]
+    if current_rows.empty:
+        return []
+    current_report_month = str(current_rows["snapshot_month"].iloc[0])
+    previous_report_month = str(pd.Period(current_report_month, freq="M") - 1)
+    metadata = data[["snapshot_date", "snapshot_month", "snapshot_status"]].drop_duplicates("snapshot_date")
+    candidates = metadata[
+        metadata["snapshot_status"].eq(SNAPSHOT_STATUS_OFFICIAL)
+        & metadata["snapshot_month"].astype(str).eq(previous_report_month)
+    ]
+    return sorted(candidates["snapshot_date"].astype(str).tolist())
+
+
 @st.cache_data(show_spinner="正在读取并预处理月度宽表...")
 def cached_load(
     data_dir: str,
@@ -776,10 +813,11 @@ def render_filter_pills(
     selected_asset_class: str,
     selected_manager: str,
 ) -> None:
+    current_label = snapshot_display_label(current_month)
     if comparison_mode == "年初以来":
-        view_text = f"年初以来，截至 {current_month}"
+        view_text = f"年初以来，截至 {current_label}"
     else:
-        view_text = f"{current_month} 单月复盘，规模较 {prior_month}"
+        view_text = f"{current_label} 单月复盘，规模较 {snapshot_display_label(prior_month)}"
     items = [
         ("当前视角", view_text),
     ]
@@ -846,8 +884,8 @@ def render_decision_summary(
     asset_class_summary: pd.DataFrame,
     quality: dict[str, int],
 ) -> None:
-    baseline = "年初" if comparison_mode == "年初以来" else prior_month
-    period = "年初以来" if comparison_mode == "年初以来" else "本月"
+    baseline = "年初" if comparison_mode == "年初以来" else snapshot_display_label(prior_month)
+    period = "年初以来截至时点" if comparison_mode == "年初以来" else "本月截至时点"
     mv_delta = current_mv - prior_mv
     mv_direction = "增加" if mv_delta >= 0 else "减少"
     top_gain = metric_extreme(asset_class_summary, "asset_class", "comprehensive_income_mtd_current", False)
@@ -867,7 +905,7 @@ def render_decision_summary(
     st.markdown(
         (
             '<p class="decision-summary">'
-            f"{html_text(current_month)} 全价市值 {html_text(amount(current_mv))}，"
+            f"{html_text(snapshot_display_label(current_month))} 全价市值 {html_text(amount(current_mv))}，"
             f"较 {html_text(baseline)} {html_text(mv_direction)} {html_text(amount(abs(mv_delta)))}；"
             f"{html_text(period)}综合收益 {html_text(amount(current_comp))}。"
             f"{html_text(gain_text)}；{html_text(drag_text)}；{html_text(quality_text)}。"
@@ -1035,7 +1073,7 @@ def sidebar_nav() -> None:
 
 
 def quality_metrics(data: pd.DataFrame, current_month: str, comparison_mode: str) -> dict[str, int]:
-    current = data[data["snapshot_month"] == current_month]
+    current = snapshot_slice(data, current_month)
     unassigned_manager = int((current["manager"] == "未分配/待确认").sum())
     missing_class = int((current["asset_class"] == "未分类/待确认").sum())
     capital_col = "avg_capital_ytd" if comparison_mode == "年初以来" else "avg_capital_mtd"
@@ -1461,12 +1499,13 @@ def render_bar_chart(
     st.altair_chart(chart, width="stretch")
 
 
-def _month_count_for_annualization(current_month: str) -> int:
+def _annualization_factor(snapshot_date: str) -> float:
     try:
-        month_number = int(str(current_month).split("-")[1])
-    except (IndexError, ValueError):
-        return 12
-    return max(1, min(12, month_number))
+        parsed = pd.Timestamp(snapshot_date)
+    except (TypeError, ValueError):
+        return 1.0
+    days_in_year = 366 if parsed.is_leap_year else 365
+    return days_in_year / max(1, parsed.dayofyear)
 
 
 def _split_plan_asset_classes(value: object) -> list[str]:
@@ -1519,8 +1558,7 @@ def asset_return_completion_summary(data: pd.DataFrame, current_month: str, plan
     )
     ytd_summary = ytd_summary.copy()
     ytd_summary["asset_class"] = ytd_summary["asset_class"].astype(str)
-    months_elapsed = _month_count_for_annualization(current_month)
-    annualization_factor = 12 / months_elapsed
+    annualization_factor = _annualization_factor(current_month)
 
     rows: list[dict[str, object]] = []
     for _, plan_row in plan.iterrows():
@@ -1619,7 +1657,7 @@ def render_asset_return_completion(data: pd.DataFrame, current_month: str) -> No
     st.markdown("#### 资产收益金额完成情况")
     show_block_note(
         "本模块比较非年化收益金额，不以收益率是否达标作为主判断；当前收益金额使用年初以来综合收益额，"
-        "右侧收益率图恢复上一版区间视图，点为YTD综合收益率按报告月份数年化后的结果，仅作辅助观察。"
+        "右侧收益率图恢复上一版区间视图，点为YTD综合收益率按当前数据时点的年内已过天数年化后的结果，仅作辅助观察。"
     )
 
     total_planned_income = float(completion["planned_income"].sum())
@@ -1904,8 +1942,9 @@ def render_outsourced_equity_evidence(
         "现金、存款、货币基金、债券、固收基金、应收、费用和轧差项不进入本表。"
     )
 
-    relevant_months = {current_month, prior_month}
-    relevant_data = data[data["snapshot_month"].isin(relevant_months)]
+    relevant_snapshots = {current_month, prior_month}
+    snapshot_key = "snapshot_date" if "snapshot_date" in data.columns else "snapshot_month"
+    relevant_data = data[data[snapshot_key].isin(relevant_snapshots)]
     outsourced_equity = outsourced_equity_holding_slice(relevant_data)
     if outsourced_equity.empty:
         st.info("当前没有可展示的委外权益持仓。")
@@ -2175,7 +2214,7 @@ def account_duration_summary(data: pd.DataFrame, current_month: str) -> pd.DataF
     if data.empty or "duration" not in data.columns:
         return pd.DataFrame(columns=columns)
 
-    current = data[data["snapshot_month"] == current_month].copy()
+    current = snapshot_slice(data, current_month).copy()
     if current.empty:
         return pd.DataFrame(columns=columns)
 
@@ -2284,7 +2323,7 @@ def render_duration_chart(duration_summary: pd.DataFrame, comparison_mode: str) 
 
 def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     if data.empty:
-        st.info("暂无可展示的月份趋势数据。")
+        st.info("暂无可展示的数据时点趋势。")
         return
 
     working = data.copy()
@@ -2301,7 +2340,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     )
 
     monthly = (
-        working.groupby("snapshot_month", dropna=False)
+        working.groupby("snapshot_date", dropna=False)
         .agg(
             full_market_value=("full_market_value", "sum"),
             finance_income_mtd=("finance_income_mtd", "sum"),
@@ -2312,17 +2351,17 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
             reverse_repo=("_reverse_repo", "sum"),
         )
         .reset_index()
-        .sort_values("snapshot_month")
+        .sort_values("snapshot_date")
     )
     if monthly.empty:
-        st.info("暂无可展示的月份趋势数据。")
+        st.info("暂无可展示的数据时点趋势。")
         return
 
     monthly["net_repo_financing"] = monthly["repo_financing"] - monthly["reverse_repo"]
     monthly["repo_financing_ratio"] = (
         monthly["repo_financing"] / monthly["full_market_value"].replace(0.0, np.nan)
     )
-    month_order = monthly["snapshot_month"].astype(str).tolist()
+    month_order = monthly["snapshot_date"].astype(str).tolist()
     market_min = float(monthly["full_market_value"].min())
     market_max = float(monthly["full_market_value"].max())
     market_padding = max((market_max - market_min) * 0.25, market_max * 0.004)
@@ -2330,7 +2369,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     monthly["market_baseline"] = market_baseline
 
     scale_tooltip = [
-        alt.Tooltip("snapshot_month:N", title="月份"),
+        alt.Tooltip("snapshot_date:N", title="数据时点"),
         alt.Tooltip("full_market_value:Q", title="全价市值(亿)", format=",.2f"),
         alt.Tooltip("repo_financing:Q", title="正回购融资余额(亿)", format=",.2f"),
         alt.Tooltip("repo_financing_ratio:Q", title="正回购融资/全价市值", format=".2%"),
@@ -2342,7 +2381,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         .mark_bar(color=POSITIVE_COLOR, cornerRadiusTopLeft=4, cornerRadiusTopRight=4, width=44)
         .encode(
             x=alt.X(
-                "snapshot_month:N",
+                "snapshot_date:N",
                 title=None,
                 sort=month_order,
                 axis=alt.Axis(labelAngle=0),
@@ -2360,7 +2399,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         alt.Chart(monthly)
         .mark_text(dy=-8, color=POSITIVE_COLOR, fontWeight=600)
         .encode(
-            x=alt.X("snapshot_month:N", sort=month_order),
+            x=alt.X("snapshot_date:N", sort=month_order),
             y=alt.Y(
                 "full_market_value:Q",
                 axis=None,
@@ -2374,7 +2413,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         alt.Chart(monthly)
         .mark_line(color=NEGATIVE_COLOR, point=alt.OverlayMarkDef(color=NEGATIVE_COLOR, size=70), strokeWidth=2.5)
         .encode(
-            x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
+            x=alt.X("snapshot_date:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
             y=alt.Y(
                 "repo_financing:Q",
                 title=None,
@@ -2388,7 +2427,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         alt.Chart(monthly)
         .mark_text(dy=-12, color=NEGATIVE_COLOR, fontWeight=600)
         .encode(
-            x=alt.X("snapshot_month:N", sort=month_order),
+            x=alt.X("snapshot_date:N", sort=month_order),
             y=alt.Y(
                 "repo_financing:Q",
                 axis=None,
@@ -2411,7 +2450,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     ytd_label_finance = "年初以来财务收益"
     ytd_label_comprehensive = "年初以来综合收益"
     income_bar_long = monthly.melt(
-        id_vars=["snapshot_month"],
+        id_vars=["snapshot_date"],
         value_vars=["finance_income_mtd", "comprehensive_income_mtd"],
         var_name="income_type",
         value_name="income_value",
@@ -2423,7 +2462,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         }
     )
     income_point_long = monthly.melt(
-        id_vars=["snapshot_month"],
+        id_vars=["snapshot_date"],
         value_vars=["finance_income_ytd", "comprehensive_income_ytd"],
         var_name="income_type",
         value_name="income_value",
@@ -2448,7 +2487,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     ]
     income_colors = [NEUTRAL_COLOR, POSITIVE_COLOR, "#C88439", "#0F6F3F"]
     income_tooltip = [
-        alt.Tooltip("snapshot_month:N", title="月份"),
+        alt.Tooltip("snapshot_date:N", title="数据时点"),
         alt.Tooltip("income_type:N", title="收益口径"),
         alt.Tooltip("income_value:Q", title="收益(亿)", format=",.2f"),
     ]
@@ -2456,7 +2495,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         alt.Chart(income_bar_long)
         .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
         .encode(
-            x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
+            x=alt.X("snapshot_date:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
             xOffset=alt.XOffset("income_type:N", sort=[mtd_label_finance, mtd_label_comprehensive]),
             y=alt.Y("income_value:Q", title="收益(亿)"),
             color=alt.Color(
@@ -2472,7 +2511,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         alt.Chart(income_point_long)
         .mark_line(strokeWidth=2.4, opacity=0.9)
         .encode(
-            x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
+            x=alt.X("snapshot_date:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
             y=alt.Y("income_value:Q", title="收益(亿)"),
             color=alt.Color(
                 "income_type:N",
@@ -2488,7 +2527,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         alt.Chart(income_point_long)
         .mark_point(filled=True, size=100, stroke="white", strokeWidth=1.4)
         .encode(
-            x=alt.X("snapshot_month:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
+            x=alt.X("snapshot_date:N", title=None, sort=month_order, axis=alt.Axis(labelAngle=0)),
             y=alt.Y("income_value:Q", title="收益(亿)"),
             color=alt.Color(
                 "income_type:N",
@@ -2502,7 +2541,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
     zero_rule = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color="#475569", opacity=0.45).encode(y="y:Q")
     income_chart = (
         (income_bars + income_lines + income_points + zero_rule)
-        .properties(title="收益趋势：当月30天 + 年初以来累计趋势", height=300)
+        .properties(title="收益趋势：当月截至数据时点 + 年初以来累计趋势", height=300)
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
     )
@@ -2711,13 +2750,13 @@ def main() -> None:
             + "、".join(runtime_missing_columns)
         )
 
-    months = available_months(data)
-    if not months:
-        st.error("至少需要一个带月份的快照文件才能做账户复盘。")
+    snapshots = available_snapshots(data)
+    if not snapshots:
+        st.error("至少需要一个带完整日期的数据快照才能做账户复盘。")
         st.stop()
 
-    default_current = months[-1]
-    default_prior = months[-2] if len(months) > 1 else months[-1]
+    status_by_snapshot = snapshot_status_map(data)
+    default_current = snapshots[-1]
 
     if st.session_state.get("reset_filters"):
         st.session_state["账户"] = ALL
@@ -2728,21 +2767,35 @@ def main() -> None:
         st.session_state["reset_filters"] = False
 
     with st.sidebar:
-        current_month = st.selectbox("报告月份", months, index=months.index(default_current))
+        current_month = st.selectbox(
+            "数据时点",
+            snapshots,
+            index=snapshots.index(default_current),
+            format_func=lambda value: snapshot_display_label(value, status_by_snapshot.get(value)),
+        )
         comparison_mode = st.selectbox("分析视角", ["年初以来", "单月复盘"], index=0)
-        prior_candidates = [month for month in months if month < current_month]
+        prior_candidates = previous_official_snapshots(data, current_month)
         if comparison_mode == "单月复盘" and not prior_candidates:
-            st.error("该报告月份之前没有上一可用月份，不能做单月复盘规模变化。")
+            st.error("缺少上一自然月的月末正式快照，不能做单月复盘规模变化。")
             st.stop()
         if comparison_mode == "单月复盘":
             prior_month = prior_candidates[-1]
-            st.caption(f"单月复盘自动使用上一可用月份 {prior_month} 作为规模变化基准。")
+            st.caption(
+                f"单月复盘使用上一自然月正式快照 {snapshot_display_label(prior_month)} 作为规模变化基准。"
+            )
         else:
-            prior_month = prior_candidates[-1] if prior_candidates else default_prior
+            prior_month = prior_candidates[-1] if prior_candidates else ""
             st.caption("年初以来口径使用源表年初市值、本年以来收益、本年以来平均资金占用。")
         if st.button("重置局部筛选"):
             st.session_state["reset_filters"] = True
             st.rerun()
+
+    current_snapshot_status = status_by_snapshot.get(current_month, SNAPSHOT_STATUS_INTERIM)
+    if current_snapshot_status == SNAPSHOT_STATUS_INTERIM:
+        st.warning(
+            f"当前展示的是 {snapshot_display_label(current_month, current_snapshot_status)}，并非当月月末正式版本；"
+            "所有指标仅截至该数据时点，后续月末数据可能调整。"
+        )
 
     account_summary = ensure_summary_columns(
         comparison_summary(data, current_month, prior_month, ["account_bucket"], comparison_mode),
@@ -2753,7 +2806,7 @@ def main() -> None:
         st.session_state["账户"] = ALL
     selected_account = st.session_state.get("账户", ALL)
 
-    current_options_slice = data[data["snapshot_month"] == current_month]
+    current_options_slice = snapshot_slice(data, current_month)
     account_filtered_options = current_options_slice
     if selected_account != ALL:
         account_filtered_options = account_filtered_options[account_filtered_options["account_bucket"] == selected_account]
@@ -2779,15 +2832,15 @@ def main() -> None:
         selected_manager,
     )
 
-    current_slice = data[data["snapshot_month"] == current_month]
-    prior_slice = data[data["snapshot_month"] == prior_month]
+    current_slice = snapshot_slice(data, current_month)
+    prior_slice = snapshot_slice(data, prior_month)
     current_mv = float(current_slice["full_market_value"].sum())
     if comparison_mode == "年初以来":
         prior_mv = float(current_slice["market_value_year_open"].sum())
         current_fin = float(current_slice["finance_income_ytd"].sum())
         current_comp = float(current_slice["comprehensive_income_ytd"].sum())
         current_capital = float(current_slice["avg_capital_ytd"].sum())
-        period_label = "年初以来"
+        period_label = "年初以来截至时点" if current_snapshot_status == SNAPSHOT_STATUS_INTERIM else "年初以来"
         baseline_label = "年初"
         capital_label = "本年以来平均资金占用"
     else:
@@ -2795,7 +2848,7 @@ def main() -> None:
         current_fin = float(current_slice["finance_income_mtd"].sum())
         current_comp = float(current_slice["comprehensive_income_mtd"].sum())
         current_capital = float(current_slice["avg_capital_mtd"].sum())
-        period_label = "本月"
+        period_label = "本月截至时点" if current_snapshot_status == SNAPSHOT_STATUS_INTERIM else "本月"
         baseline_label = "上月"
         capital_label = "本月平均资金占用"
     quality = quality_metrics(data, current_month, comparison_mode)
@@ -2820,7 +2873,7 @@ def main() -> None:
     )
     render_kpi_grid(
         [
-            {"label": "报告月市值", "value": amount(current_mv), "delta": signed_amount(current_mv - prior_mv)},
+            {"label": "时点市值", "value": amount(current_mv), "delta": signed_amount(current_mv - prior_mv)},
             {"label": f"{period_label}财务收益", "value": amount(current_fin)},
             {"label": f"{period_label}综合收益", "value": amount(current_comp)},
             {"label": capital_label, "value": amount(current_capital)},
@@ -2830,12 +2883,12 @@ def main() -> None:
     render_action_cards()
     render_quality_signal(quality)
     show_block_note(
-        f"顶部指标均为报告月份全组合源表逐行加总；市值变化 = 报告月市值 - {baseline_label}市值；收益与资金占用采用{period_label}口径。"
+        f"顶部指标均为当前数据时点全组合源表逐行加总；市值变化 = 时点市值 - {baseline_label}市值；收益与资金占用采用{period_label}口径。"
     )
 
     section_anchor("charts-overview")
     st.subheader("图表总览")
-    show_block_note("左图用柱展示全组合规模、用红色点线展示正回购融资余额；右图用柱展示当月30天收益，用折线+点展示对应口径的年初以来累计收益。")
+    show_block_note("左图用柱展示各数据时点全组合规模、用红色点线展示正回购融资余额；右图用柱展示当月截至对应时点的收益，用折线+点展示年初以来累计收益。")
     render_monthly_trends(data, comparison_mode)
 
     st.divider()
@@ -2845,7 +2898,7 @@ def main() -> None:
     scale_income_label = "年初以来综合收益" if comparison_mode == "年初以来" else "本月综合收益"
     scale_baseline_label = "年初市值" if comparison_mode == "年初以来" else "上月市值"
     show_block_note(
-        f"本表不分账户，直接按投资品种汇总；股权/不动产相关品种用资产主题标明并强制纳入图表；右侧净规模变化 = 报告月市值 - {scale_baseline_label} - {scale_income_label}，用于近似识别真实增减仓或资金进出。"
+        f"本表不分账户，直接按投资品种汇总；股权/不动产相关品种用资产主题标明并强制纳入图表；右侧净规模变化 = 时点市值 - {scale_baseline_label} - {scale_income_label}，用于近似识别真实增减仓或资金进出。"
     )
     asset_class_display = asset_class_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
     asset_income_metric, asset_income_title, asset_income_value_title = income_chart_config(
@@ -2921,7 +2974,7 @@ def main() -> None:
         "本模块复刻管理透视表口径：委内展示委托资管下的固收配置盘、固收交易盘、非标、权益配置盘、权益交易盘；"
         "委外并列展示人保/泰康/中信建投/中邮证券固收，富国/华泰/华夏基金/国泰海通/大成基金/广发基金权益，"
         "以及太平资产香港、太保投资香港、国寿富兰克林。"
-        "单一委外计划按月在顶层汇总行与底层持仓中选择有规模的一层，避免重复计算；"
+        "单一委外计划按数据时点在顶层汇总行与底层持仓中选择有规模的一层，避免重复计算；"
         "指定委外账户按账户全量纳入，包含现金、应收、费用等调节项；"
         "富国顶层产品行只作为对账提示，避免重复计算底层持仓；"
         "卡片胶囊数字为综合收益率。"
@@ -3210,7 +3263,7 @@ def main() -> None:
         evidence_options = asset_evidence_sort_options(comparison_mode)
     else:
         show_block_note(
-            f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按报告月份和上一可用月份 {prior_month} 是否出现及市值变化判断。"
+            f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按当前数据时点和上一月正式快照 {snapshot_display_label(prior_month)} 是否出现及市值变化判断。"
         )
         evidence = asset_evidence(
             data,
@@ -3281,7 +3334,7 @@ def main() -> None:
     render_quality_bar(quality)
 
     st.subheader("财务收益与综合收益差异")
-    show_block_note(f"本表用于回答财务收益和综合收益差在哪里；金额为报告月份源表逐行加总，采用{period_label}口径。")
+    show_block_note(f"本表用于回答财务收益和综合收益差在哪里；金额为当前数据时点源表逐行加总，采用{period_label}口径。")
     diff_table = income_diff_breakdown(current_slice, comparison_mode)
     st.dataframe(
         diff_table.style.format({"金额(亿)": "{:,.2f}"}, na_rep="—"),

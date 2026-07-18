@@ -7,7 +7,7 @@ import pandas as pd
 INTERNAL_MANDATE = "委托资管"
 RETURN_BASE_THRESHOLD = 0.0001
 EXCLUDED_STRATEGY_BOOK = "流动性/其他未纳入五类"
-STRATEGY_CLASSIFICATION_VERSION = "2026-07-18-v1"
+STRATEGY_CLASSIFICATION_VERSION = "2026-07-18-v2"
 
 INTERNAL_STRATEGY_BOOK_ORDER = [
     "固收-配置盘",
@@ -344,7 +344,7 @@ def exclusion_reason(row: pd.Series | dict) -> str:
 
 
 def _resolve_single_plan_hierarchy(working: pd.DataFrame) -> pd.Series:
-    """Choose one source level per month for each single outsourced plan."""
+    """Choose one source level per exact snapshot for each single outsourced plan."""
     reasons = pd.Series("", index=working.index, dtype=object)
     if working.empty:
         return reasons
@@ -353,7 +353,9 @@ def _resolve_single_plan_hierarchy(working: pd.DataFrame) -> pd.Series:
         working.get("full_market_value", pd.Series(0.0, index=working.index)),
         errors="coerce",
     ).fillna(0.0)
-    if "snapshot_month" in working.columns:
+    if "snapshot_date" in working.columns:
+        month_key = working["snapshot_date"].fillna("").astype(str)
+    elif "snapshot_month" in working.columns:
         month_key = working["snapshot_month"].fillna("").astype(str)
     else:
         month_key = pd.Series("__all__", index=working.index)
@@ -457,7 +459,8 @@ def _metric_columns(comparison_mode: str) -> tuple[str, str, str]:
 
 
 def _current_strategy_slice(data: pd.DataFrame, current_month: str) -> pd.DataFrame:
-    working = data[data["snapshot_month"] == current_month].copy()
+    snapshot_key = "snapshot_date" if "snapshot_date" in data.columns else "snapshot_month"
+    working = data[data[snapshot_key] == current_month].copy()
     return ensure_strategy_book_columns(working)
 
 

@@ -283,20 +283,23 @@ class StrategyBookClassificationTest(unittest.TestCase):
         frame = pd.DataFrame(
             [
                 row(
-                    snapshot_month="2026-06",
+                    snapshot_date="2026-07-16",
+                    snapshot_month="2026-07",
                     mandate_type="富国基金单一计划",
                     fund_book_name="分红邮储单一委外专户",
                     full_market_value=5.46,
                     asset_name="六月顶层",
                 ),
                 row(
-                    snapshot_month="2026-06",
+                    snapshot_date="2026-07-16",
+                    snapshot_month="2026-07",
                     mandate_type="单一委外",
                     fund_book_name="富国基金中邮1号单一资产管理计划",
                     full_market_value=5.47,
                     asset_name="六月底层",
                 ),
                 row(
+                    snapshot_date="2026-07-31",
                     snapshot_month="2026-07",
                     mandate_type="富国基金单一计划",
                     fund_book_name="分红邮储单一委外专户",
@@ -304,6 +307,7 @@ class StrategyBookClassificationTest(unittest.TestCase):
                     asset_name="七月顶层",
                 ),
                 row(
+                    snapshot_date="2026-07-31",
                     snapshot_month="2026-07",
                     mandate_type="单一委外",
                     fund_book_name="富国基金中邮1号单一资产管理计划",
@@ -334,7 +338,7 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
 
     def test_20260531_control_totals(self):
         self.assert_control_totals(
-            "2026-05",
+            "2026-05-31",
             {
                 "固收-配置盘": 5021.527813,
                 "固收-交易盘": 952.914891,
@@ -353,7 +357,7 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
 
     def test_20260630_control_totals(self):
         self.assert_control_totals(
-            "2026-06",
+            "2026-06-30",
             {
                 "固收-配置盘": 5095.656198,
                 "固收-交易盘": 976.528121,
@@ -372,7 +376,7 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
 
     def test_20260716_control_totals(self):
         self.assert_control_totals(
-            "2026-07",
+            "2026-07-16",
             {
                 "人保固收": 126.847375,
                 "泰康固收": 44.433428,
@@ -393,7 +397,7 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
     def test_20260630_outsourced_equity_holding_total(self):
         data, _, errors = load_snapshots(DATA_DIR)
         self.assertEqual(errors, [])
-        current = outsourced_equity_holding_slice(data[data["snapshot_month"] == "2026-06"])
+        current = outsourced_equity_holding_slice(data[data["snapshot_date"] == "2026-06-30"])
 
         self.assertAlmostEqual(float(current["full_market_value"].sum()), 14.884508, places=6)
         actual = dict(current.groupby("strategy_book")["full_market_value"].sum())

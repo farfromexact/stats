@@ -14,8 +14,16 @@ GROUP_METRICS = [
 ]
 
 
+def _snapshot_key_column(data: pd.DataFrame) -> str:
+    return "snapshot_date" if "snapshot_date" in data.columns else "snapshot_month"
+
+
+def _snapshot_slice(data: pd.DataFrame, snapshot: str) -> pd.DataFrame:
+    return data[data[_snapshot_key_column(data)] == snapshot]
+
+
 def _aggregate(data: pd.DataFrame, month: str, group_cols: list[str]) -> pd.DataFrame:
-    subset = data[data["snapshot_month"] == month].copy()
+    subset = _snapshot_slice(data, month).copy()
     for metric in GROUP_METRICS:
         if metric not in subset:
             subset[metric] = 0.0
@@ -136,7 +144,7 @@ def filter_current(
     asset_class: str | None = None,
     manager: str | None = None,
 ) -> pd.DataFrame:
-    subset = data[data["snapshot_month"] == current_month].copy()
+    subset = _snapshot_slice(data, current_month).copy()
     if account and account != "全部":
         subset = subset[subset["account_bucket"] == account]
     if asset_class and asset_class != "全部":
@@ -219,7 +227,7 @@ def asset_evidence(
         ],
     )
     current = (
-        subset[subset["snapshot_month"] == current_month]
+        _snapshot_slice(subset, current_month)
         .groupby(cols, dropna=False)
         .agg(
             full_market_value_current=("full_market_value", "sum"),
@@ -231,7 +239,7 @@ def asset_evidence(
         .reset_index()
     )
     prior = (
-        subset[subset["snapshot_month"] == prior_month]
+        _snapshot_slice(subset, prior_month)
         .groupby(cols, dropna=False)
         .agg(
             full_market_value_prior=("full_market_value", "sum"),
@@ -308,7 +316,7 @@ def asset_evidence_year_open(
         ],
     )
     evidence = (
-        subset[subset["snapshot_month"] == current_month]
+        _snapshot_slice(subset, current_month)
         .groupby(cols, dropna=False)
         .agg(
             full_market_value_current=("full_market_value", "sum"),
@@ -324,7 +332,7 @@ def asset_evidence_year_open(
 
     if prior_month:
         month_prior = (
-            subset[subset["snapshot_month"] == prior_month]
+            _snapshot_slice(subset, prior_month)
             .groupby(cols, dropna=False)
             .agg(
                 full_market_value_month_prior=("full_market_value", "sum"),

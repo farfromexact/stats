@@ -2,10 +2,35 @@ import unittest
 
 import pandas as pd
 
-from account_review import asset_evidence, asset_evidence_year_open
+from account_review import asset_evidence, asset_evidence_year_open, comparison_summary
 
 
 class AssetEvidenceTest(unittest.TestCase):
+    def test_same_month_snapshots_are_filtered_by_exact_date(self):
+        data = pd.DataFrame(
+            [
+                {
+                    "snapshot_date": "2026-07-16",
+                    "snapshot_month": "2026-07",
+                    "account_bucket": "传统",
+                    "asset_name": "0716资产",
+                    "full_market_value": 16.0,
+                },
+                {
+                    "snapshot_date": "2026-07-31",
+                    "snapshot_month": "2026-07",
+                    "account_bucket": "传统",
+                    "asset_name": "0731资产",
+                    "full_market_value": 31.0,
+                },
+            ]
+        )
+
+        summary = comparison_summary(data, "2026-07-16", "2026-06-30", ["account_bucket"], "年初以来")
+
+        self.assertEqual(len(summary), 1)
+        self.assertEqual(float(summary["full_market_value_current"].iloc[0]), 16.0)
+
     def test_extra_group_columns_keep_outsourced_books_separate(self):
         data = pd.DataFrame(
             [

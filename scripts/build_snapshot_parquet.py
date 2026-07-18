@@ -26,21 +26,26 @@ def build_snapshot_parquet(data_dir: Path = DATA_DIR, output_dir: Path | None = 
     if not files:
         raise RuntimeError(f"No YYYYMMDD .xlsx snapshots found in {data_dir}.")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for old_file in output_dir.glob("*.parquet"):
-        old_file.unlink()
-
     entries: list[dict] = []
+    frames_to_write: list[tuple[str, object]] = []
+    written_snapshot_dates: set[str] = set()
     for path in files:
         frame, log = _read_one(path)
         if log["status"] != "OK" or frame is None:
             raise RuntimeError(f"{path.name}: {log['message']}")
 
-        parquet_name = f"{log['snapshot_month']}.parquet"
-        frame.to_parquet(output_dir / parquet_name, index=False)
+        snapshot_date = str(log["snapshot_date"])
+        if snapshot_date in written_snapshot_dates:
+            raise RuntimeError(f"Duplicate snapshot date {snapshot_date}: {path.name}")
+        written_snapshot_dates.add(snapshot_date)
+
+        parquet_name = f"{snapshot_date}.parquet"
+        frames_to_write.append((parquet_name, frame))
         entries.append(
             {
+                "snapshot_date": snapshot_date,
                 "snapshot_month": log["snapshot_month"],
+                "snapshot_status": log["snapshot_status"],
                 "source_file_name": log["source_file_name"],
                 "source_file_hash": log["source_file_hash"],
                 "source_rows": int(log["source_rows"]),
@@ -51,6 +56,12 @@ def build_snapshot_parquet(data_dir: Path = DATA_DIR, output_dir: Path | None = 
                 "parquet_file": parquet_name,
             }
         )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for old_file in output_dir.glob("*.parquet"):
+        old_file.unlink()
+    for parquet_name, frame in frames_to_write:
+        frame.to_parquet(output_dir / parquet_name, index=False)
 
     manifest = {
         "manifest_version": PARQUET_MANIFEST_VERSION,

@@ -28,7 +28,7 @@
 
 ## 核心功能
 
-- **总体复盘**：汇总报告月市值、年初以来收益、平均资金占用、快照行数和数据质量提示。
+- **总体复盘**：汇总当前数据时点市值、年初以来收益、平均资金占用、快照行数和数据质量提示。
 - **趋势图表**：展示全价市值、正回购融资余额、当月收益与年初以来累计收益走势。
 - **投资品种分析**：按投资品种比较收益贡献和扣收益后的规模变化，并强制纳入股权/不动产主题品种，避免低频资产被 Top/Bottom 截断。
 - **委内/委外比较**：并列展示委内配置盘、交易盘、非标，以及人保、泰康、中信建投、中邮证券、富国、华泰、华夏、国泰海通、大成、广发、太平资产香港、太保投资香港、国寿富兰克林等委外账户。
@@ -38,7 +38,8 @@
 
 ## 数据与口径
 
-- 月度快照文件放在 `data/monthly_snapshots/`。
+- 月末正式版和临时中间版快照均放在 `data/monthly_snapshots/`；文件名必须含 `YYYYMMDD`。
+- 页面以完整日期作为唯一分析键，并明确显示“月末正式版”或“临时中间版”；`snapshot_month` 只保留为所属月份标签。
 - 加速读取文件放在 `data/snapshot_parquet/`，由源 Excel 转换生成；Excel 仍是权威源。
 - 数据读取与字段标准化在 `portfolio_data.py`。
 - 账户、品种、经理和资产证据汇总在 `account_review.py`。
@@ -48,7 +49,7 @@
 
 ## 月度数据更新
 
-1. 将新的月度 Excel 宽表放入 `data/monthly_snapshots/`。
+1. 将新的月末或临时 Excel 宽表放入 `data/monthly_snapshots/`，并在文件名中保留完整日期。
 2. 运行 `python scripts/build_snapshot_parquet.py`，更新 `data/snapshot_parquet/*.parquet` 和 `manifest.json`。
 3. 运行 `python -m unittest`，确认控制数和读取回归通过。
 4. 提交 Excel、parquet、manifest 以及相关代码或文档变更。
