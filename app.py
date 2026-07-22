@@ -50,13 +50,14 @@ ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
 MAINTENANCE_MESSAGE = "多事之秋，我们秋天再见"
 MAINTENANCE_SUBMESSAGE = "如有需要微信找我"
 CHART_EPSILON = 1e-9
-POSITIVE_COLOR = "#122256"
-NEGATIVE_COLOR = "#8B2F2F"
-NEUTRAL_COLOR = "#8EA0B6"
-FUNDING_COLOR = "#6F7F92"
-HEATMAP_NEUTRAL_COLOR = "#F7F4EF"
-HEATMAP_POSITIVE_LIGHT = "#B7CCE4"
-HEATMAP_NEGATIVE_LIGHT = "#E3B0AE"
+# Columbia / BioShock Infinite palette: sky navy, brass, parchment, refined crimson.
+POSITIVE_COLOR = "#1B3A5C"
+NEGATIVE_COLOR = "#8C3A3A"
+NEUTRAL_COLOR = "#8BA9BF"
+FUNDING_COLOR = "#6E7F92"
+HEATMAP_NEUTRAL_COLOR = "#F7F1E3"
+HEATMAP_POSITIVE_LIGHT = "#B7D0E4"
+HEATMAP_NEGATIVE_LIGHT = "#E3B6B0"
 FUNDING_COST_RATE = 0.0341
 GUARANTEE_COST_RATE = 0.0324
 EFFECTIVE_COST_RATE = 0.0326
@@ -79,57 +80,82 @@ FUNDING_ASSET_CLASSES = REPO_FINANCING_ASSET_CLASSES | REVERSE_REPO_ASSET_CLASSE
 EQUITY_THEME_KEYWORDS = ("股权", "长股投")
 REAL_ESTATE_THEME_KEYWORDS = ("不动产",)
 
-st.set_page_config(page_title="组合管理账户复盘", layout="wide")
+st.set_page_config(page_title="组合管理账户复盘 · Columbia", layout="wide")
 
 
-def apply_yacht_theme() -> None:
-    st.markdown(
+def apply_columbia_theme() -> None:
+    """Apply a restrained Columbia-inspired shell around the operating dashboard."""
+    st.html(
         """
         <style>
         :root {
-            --yacht-ink: #0D0707;
-            --yacht-navy: #122256;
-            --yacht-blue: #8EA0B6;
-            --yacht-foam: #F2F1ED;
-            --yacht-deck: #DCDACD;
-            --rat-internal: #2F5AA8;
-            --rat-external: #0F8B7B;
+            --columbia-ink: #1C2433;
+            --columbia-navy: #1B3A5C;
+            --columbia-sky: #6FA8C9;
+            --columbia-sky-soft: #A8D0E4;
+            --columbia-brass: #C9A84C;
+            --columbia-brass-deep: #A8882E;
+            --columbia-brass-soft: #E8D48B;
+            --columbia-parchment: #F7F1E3;
+            --columbia-cream: #FFFBF3;
+            --columbia-border: #D9CDB5;
+            --columbia-muted: #5C6B7A;
+            --columbia-crimson: #8C3A3A;
+            --columbia-foam: #FBF6EC;
+            --rat-internal: #3D6F9A;
+            --rat-external: #2F7A6B;
+        }
+
+        html, body, [class*="css"] {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
         }
 
         .stApp {
-            background: var(--yacht-foam);
-            color: var(--yacht-ink);
+            background: #F4F3EE;
+            color: var(--columbia-ink);
+        }
+
+        .stApp::before {
+            display: none;
+        }
+
+        section.main > div {
+            position: relative;
+            z-index: 1;
         }
 
         section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, var(--yacht-navy) 0%, #172b63 58%, #0D0707 100%);
+            background:
+                linear-gradient(180deg, #142844 0%, #1B3A5C 42%, #0F1F33 100%);
+            border-right: 1px solid rgba(201, 168, 76, 0.35);
         }
 
         section[data-testid="stSidebar"] * {
-            color: var(--yacht-foam);
+            color: var(--columbia-foam);
         }
 
         section[data-testid="stSidebar"] div[data-baseweb="select"] * {
-            color: var(--yacht-ink);
+            color: var(--columbia-ink);
         }
 
         section[data-testid="stSidebar"] div[data-baseweb="select"] {
-            background: var(--yacht-foam);
-            border-radius: 6px;
+            background: var(--columbia-cream);
+            border-radius: 4px;
+            border: 1px solid rgba(201, 168, 76, 0.45);
         }
 
         section[data-testid="stSidebar"] input {
-            color: var(--yacht-ink);
-            background: var(--yacht-foam);
+            color: var(--columbia-ink);
+            background: var(--columbia-cream);
         }
 
         section[data-testid="stSidebar"] code,
         section[data-testid="stSidebar"] pre,
         section[data-testid="stSidebar"] kbd {
-            color: var(--yacht-ink) !important;
-            background: var(--yacht-foam) !important;
-            border: 1px solid var(--yacht-blue);
-            border-radius: 6px;
+            color: var(--columbia-ink) !important;
+            background: var(--columbia-cream) !important;
+            border: 1px solid rgba(201, 168, 76, 0.45);
+            border-radius: 4px;
             white-space: normal;
             overflow-wrap: anywhere;
         }
@@ -137,39 +163,107 @@ def apply_yacht_theme() -> None:
         section[data-testid="stSidebar"] p,
         section[data-testid="stSidebar"] label,
         section[data-testid="stSidebar"] span {
-            color: var(--yacht-foam);
+            color: var(--columbia-foam);
+        }
+
+        section[data-testid="stSidebar"] h1,
+        section[data-testid="stSidebar"] h2,
+        section[data-testid="stSidebar"] h3 {
+            color: var(--columbia-brass-soft) !important;
+            font-family: inherit;
+            letter-spacing: 0;
+            border-bottom: none !important;
         }
 
         h1, h2, h3 {
-            color: var(--yacht-navy);
+            color: var(--columbia-navy);
+            font-family: inherit;
             letter-spacing: 0;
+            font-weight: 700;
         }
 
         h1 {
-            border-bottom: 3px solid var(--yacht-blue);
-            padding-bottom: 0.35rem;
+            border-bottom: 2px solid var(--columbia-sky-soft);
+            padding-bottom: 0.38rem;
+        }
+
+        h2 {
+            border-left: 3px solid var(--columbia-brass);
+            padding-left: 0.65rem;
+            margin-top: 0.4rem;
+        }
+
+        h3 {
+            color: #2A4A6B;
         }
 
         div[data-testid="stMetric"] {
-            background: rgba(255, 255, 255, 0.72);
-            border: 1px solid var(--yacht-deck);
-            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.78);
+            border: 1px solid var(--columbia-border);
+            border-radius: 6px;
             padding: 0.85rem 1rem;
-            box-shadow: 0 2px 10px rgba(13, 7, 7, 0.05);
+            box-shadow: 0 2px 10px rgba(27, 58, 92, 0.05);
         }
 
         div[data-testid="stMetric"] label {
-            color: var(--yacht-navy);
+            color: var(--columbia-navy);
+            font-family: inherit;
+            letter-spacing: 0;
         }
 
         div[data-testid="stMetricValue"] {
-            color: var(--yacht-ink);
+            color: var(--columbia-ink);
+        }
+
+        .hero-banner {
+            margin: 0.15rem 0 0.9rem 0;
+            padding: 0.25rem 0 0.72rem 0.85rem;
+            background: transparent;
+            border: none;
+            border-left: 3px solid var(--columbia-brass);
+        }
+
+        .hero-banner::before,
+        .hero-banner::after {
+            display: none;
+        }
+
+        .hero-banner::before { left: 0.7rem; }
+        .hero-banner::after { right: 0.7rem; }
+
+        .hero-kicker {
+            font-family: inherit;
+            font-size: 0.72rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--columbia-brass-deep);
+            margin-bottom: 0.2rem;
+            text-align: left;
+        }
+
+        .hero-title {
+            font-family: inherit;
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--columbia-navy);
+            text-align: left;
+            letter-spacing: 0;
+            line-height: 1.25;
+            margin: 0;
+        }
+
+        .hero-subtitle {
+            margin-top: 0.28rem;
+            text-align: left;
+            color: var(--columbia-muted);
+            font-size: 0.9rem;
+            line-height: 1.4;
         }
 
         .filter-pills {
             display: flex;
             flex-wrap: wrap;
-            gap: 0.45rem;
+            gap: 0.5rem;
             margin: 0.55rem 0 1rem 0;
         }
 
@@ -177,61 +271,73 @@ def apply_yacht_theme() -> None:
             display: inline-flex;
             align-items: center;
             gap: 0.35rem;
-            padding: 0.32rem 0.55rem;
-            background: rgba(255, 255, 255, 0.7);
-            border: 1px solid var(--yacht-deck);
-            border-radius: 6px;
-            color: var(--yacht-ink);
+            padding: 0.34rem 0.62rem;
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid var(--columbia-border);
+            border-radius: 5px;
+            color: var(--columbia-ink);
             font-size: 0.86rem;
             line-height: 1.25;
         }
 
         .filter-pill span {
-            color: #5B6472;
-            font-weight: 600;
+            color: var(--columbia-muted);
+            font-weight: 700;
+            font-family: inherit;
+            font-size: 0.78rem;
+            letter-spacing: 0;
         }
 
         .kpi-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
-            gap: 0.8rem;
+            gap: 0.85rem;
             margin: 0.65rem 0 0.85rem 0;
         }
 
         .kpi-card {
             min-height: 96px;
-            background: rgba(255, 255, 255, 0.78);
-            border: 1px solid var(--yacht-deck);
-            border-left: 4px solid var(--yacht-blue);
-            border-radius: 8px;
-            padding: 0.78rem 0.9rem;
-            box-shadow: 0 2px 10px rgba(13, 7, 7, 0.05);
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid var(--columbia-border);
+            border-left: 4px solid var(--columbia-brass);
+            border-radius: 6px;
+            padding: 0.82rem 0.95rem;
+            box-shadow: 0 2px 10px rgba(27, 58, 92, 0.05);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .kpi-card:hover {
+            border-color: rgba(201, 168, 76, 0.65);
+            box-shadow: 0 6px 18px rgba(27, 58, 92, 0.09);
         }
 
         .kpi-card.kpi-card-internal {
-            background: linear-gradient(180deg, rgba(47, 90, 168, 0.14) 0%, rgba(47, 90, 168, 0.08) 100%);
-            border-color: rgba(47, 90, 168, 0.38);
+            background: linear-gradient(180deg, rgba(61, 111, 154, 0.14) 0%, rgba(61, 111, 154, 0.06) 100%);
+            border-color: rgba(61, 111, 154, 0.35);
             border-left-color: var(--rat-internal);
         }
 
         .kpi-card.kpi-card-external {
-            background: linear-gradient(180deg, rgba(15, 139, 123, 0.14) 0%, rgba(15, 139, 123, 0.08) 100%);
-            border-color: rgba(15, 139, 123, 0.36);
+            background: linear-gradient(180deg, rgba(47, 122, 107, 0.14) 0%, rgba(47, 122, 107, 0.06) 100%);
+            border-color: rgba(47, 122, 107, 0.34);
             border-left-color: var(--rat-external);
         }
 
         .kpi-label {
-            color: var(--yacht-navy);
-            font-size: 0.84rem;
-            font-weight: 700;
-            line-height: 1.25;
+            color: var(--columbia-navy);
+            font-size: 0.8rem;
+            font-weight: 600;
+            font-family: inherit;
+            letter-spacing: 0;
+            line-height: 1.3;
             margin-bottom: 0.45rem;
         }
 
         .kpi-value {
-            color: var(--yacht-ink);
+            color: var(--columbia-ink);
             font-size: 1.58rem;
-            font-weight: 760;
+            font-weight: 700;
+            font-family: inherit;
             line-height: 1.16;
             overflow-wrap: anywhere;
         }
@@ -239,48 +345,54 @@ def apply_yacht_theme() -> None:
         .kpi-delta {
             display: inline-block;
             margin-top: 0.45rem;
-            color: #0F6F3F;
-            background: #E9F5ED;
+            color: #1F6B4A;
+            background: rgba(31, 107, 74, 0.1);
             border-radius: 999px;
-            padding: 0.12rem 0.42rem;
+            padding: 0.12rem 0.48rem;
             font-size: 0.82rem;
             font-weight: 700;
         }
 
         .kpi-delta.kpi-delta-positive {
-            color: var(--yacht-navy);
-            background: rgba(142, 160, 182, 0.18);
+            color: var(--columbia-navy);
+            background: rgba(111, 168, 201, 0.2);
         }
 
         .kpi-delta.kpi-delta-negative {
-            color: #8B2F2F;
-            background: rgba(139, 47, 47, 0.12);
+            color: var(--columbia-crimson);
+            background: rgba(140, 58, 58, 0.12);
         }
 
         .decision-summary {
-            margin: 0.35rem 0 0.6rem 0;
-            color: var(--yacht-ink);
-            font-size: 1rem;
-            line-height: 1.65;
+            margin: 0.35rem 0 0.75rem 0;
+            padding: 0.35rem 0 0.35rem 0.85rem;
+            color: var(--columbia-ink);
+            font-size: 1.02rem;
+            line-height: 1.7;
+            font-family: inherit;
+            background: transparent;
+            border-left: 2px solid var(--columbia-brass);
+            border-radius: 0;
         }
 
         .action-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-            gap: 0.7rem;
+            gap: 0.75rem;
             margin: 0.8rem 0 1rem 0;
         }
 
         .action-card {
             display: block;
-            min-height: 92px;
+            min-height: 96px;
             background: rgba(255, 255, 255, 0.8);
-            border: 1px solid var(--yacht-deck);
-            border-radius: 8px;
-            padding: 0.78rem 0.85rem;
-            color: var(--yacht-ink) !important;
+            border: 1px solid var(--columbia-border);
+            border-radius: 6px;
+            padding: 0.85rem 0.9rem;
+            color: var(--columbia-ink) !important;
             text-decoration: none;
-            box-shadow: 0 2px 10px rgba(13, 7, 7, 0.04);
+            box-shadow: 0 3px 12px rgba(27, 58, 92, 0.05);
+            transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
         }
 
         .action-card,
@@ -289,20 +401,24 @@ def apply_yacht_theme() -> None:
         }
 
         .action-card:hover {
-            border-color: var(--yacht-blue);
+            border-color: var(--columbia-brass);
+            box-shadow: 0 8px 20px rgba(27, 58, 92, 0.1);
+            transform: translateY(-1px);
             text-decoration: none;
         }
 
         .action-title {
-            color: var(--yacht-navy);
-            font-weight: 760;
-            margin-bottom: 0.28rem;
+            color: var(--columbia-navy);
+            font-family: inherit;
+            font-weight: 700;
+            letter-spacing: 0;
+            margin-bottom: 0.32rem;
         }
 
         .action-copy {
-            color: #475569;
+            color: var(--columbia-muted);
             font-size: 0.88rem;
-            line-height: 1.42;
+            line-height: 1.45;
         }
 
         .quality-grid {
@@ -314,97 +430,134 @@ def apply_yacht_theme() -> None:
 
         .quality-card {
             background: rgba(255, 255, 255, 0.78);
-            border: 1px solid var(--yacht-deck);
-            border-radius: 8px;
+            border: 1px solid var(--columbia-border);
+            border-radius: 6px;
             padding: 0.65rem 0.75rem;
         }
 
         .quality-card.hot {
-            border-color: #C88439;
-            background: #FFF7E8;
+            border-color: var(--columbia-brass-deep);
+            background: linear-gradient(180deg, #FFF6E0 0%, #F8E8C4 100%);
+            box-shadow: inset 0 0 0 1px rgba(201, 168, 76, 0.25);
         }
 
         .quality-label {
-            color: #475569;
-            font-size: 0.8rem;
+            color: var(--columbia-muted);
+            font-size: 0.78rem;
             font-weight: 700;
+            font-family: inherit;
+            letter-spacing: 0;
             margin-bottom: 0.2rem;
         }
 
         .quality-value {
-            color: var(--yacht-ink);
+            color: var(--columbia-ink);
             font-size: 1.35rem;
-            font-weight: 760;
+            font-weight: 700;
+            font-family: inherit;
             line-height: 1.12;
         }
 
         div[data-testid="stAlert"] {
-            border-radius: 8px;
-            border-color: var(--yacht-blue);
+            border-radius: 6px;
+            border-color: rgba(201, 168, 76, 0.55);
+            background: rgba(255, 251, 243, 0.85);
         }
 
         .stButton > button {
-            background: var(--yacht-navy);
-            color: var(--yacht-foam);
-            border: 1px solid var(--yacht-navy);
-            border-radius: 6px;
+            background: var(--columbia-navy);
+            color: var(--columbia-foam);
+            border: 1px solid var(--columbia-navy);
+            border-radius: 4px;
+            font-family: inherit;
+            letter-spacing: 0;
+            font-weight: 600;
+            box-shadow: none;
         }
 
         .stButton > button:hover {
-            background: var(--yacht-ink);
-            color: var(--yacht-foam);
-            border-color: var(--yacht-ink);
+            background: linear-gradient(180deg, #3A5F88 0%, #243F63 100%);
+            color: #FFF8E7;
+            border-color: var(--columbia-brass);
+        }
+
+        .stButton > button:focus {
+            box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.35);
         }
 
         .sidebar-nav-button {
             display: block;
             width: 100%;
-            margin: 0.35rem 0;
-            padding: 0.42rem 0.65rem;
-            background: rgba(142, 160, 182, 0.18);
-            color: var(--yacht-foam) !important;
-            border: 1px solid rgba(242, 241, 237, 0.22);
-            border-radius: 6px;
+            margin: 0.32rem 0;
+            padding: 0.45rem 0.7rem;
+            background: rgba(168, 208, 228, 0.1);
+            color: var(--columbia-foam) !important;
+            border: 1px solid rgba(201, 168, 76, 0.22);
+            border-left: 2px solid rgba(201, 168, 76, 0.55);
+            border-radius: 4px;
             text-decoration: none;
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: 0.88rem;
+            transition: background 0.12s ease, border-color 0.12s ease;
         }
 
         .sidebar-nav-button:hover {
-            background: rgba(242, 241, 237, 0.16);
-            color: white !important;
+            background: rgba(201, 168, 76, 0.18);
+            border-color: rgba(201, 168, 76, 0.5);
+            color: #FFF8E7 !important;
             text-decoration: none;
         }
 
         .sidebar-nav-title {
-            margin: 1rem 0 0.4rem 0;
-            color: var(--yacht-foam) !important;
-            font-weight: 700;
-            opacity: 0.9;
+            margin: 1rem 0 0.45rem 0;
+            color: var(--columbia-brass-soft) !important;
+            font-family: inherit;
+            font-weight: 600;
+            letter-spacing: 0;
+            text-transform: none;
+            font-size: 0.78rem;
+            opacity: 0.95;
         }
 
         div[data-testid="stDataFrame"] {
-            border: 1px solid var(--yacht-deck);
-            border-radius: 8px;
+            border: 1px solid var(--columbia-border);
+            border-radius: 6px;
             overflow: hidden;
-            background: white;
+            background: var(--columbia-cream);
+            box-shadow: 0 3px 12px rgba(27, 58, 92, 0.04);
         }
 
         div[data-testid="stVegaLiteChart"] {
-            background: rgba(255, 255, 255, 0.72);
-            border: 1px solid var(--yacht-deck);
-            border-radius: 8px;
-            padding: 0.35rem;
+            background: rgba(255, 255, 255, 0.76);
+            border: 1px solid var(--columbia-border);
+            border-radius: 6px;
+            padding: 0.45rem;
+            box-shadow: 0 3px 12px rgba(27, 58, 92, 0.04);
         }
 
         div[data-testid="stCaptionContainer"] {
-            color: #475569;
+            color: var(--columbia-muted);
+            font-family: inherit;
         }
 
         hr {
-            border-color: var(--yacht-deck);
+            border-color: var(--columbia-border);
+            background: none;
         }
+
         </style>
+        """,
+    )
+
+
+def render_hero_banner(title: str, subtitle: str, kicker: str = "Columbia · Portfolio Review") -> None:
+    st.markdown(
+        f"""
+        <div class="hero-banner">
+            <div class="hero-kicker">{html_text(kicker)}</div>
+            <div class="hero-title">{html_text(title)}</div>
+            <div class="hero-subtitle">{html_text(subtitle)}</div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -448,22 +601,26 @@ def render_maintenance_page() -> None:
             display: none;
         }}
         section.main > div {{
-            padding-top: 28vh;
+            padding-top: 24vh;
         }}
         .maintenance-message {{
-            color: var(--yacht-navy);
-            font-size: clamp(2.8rem, 7vw, 6.5rem);
-            font-weight: 800;
-            line-height: 1.18;
-            text-align: center;
-            letter-spacing: 0;
-        }}
-        .maintenance-submessage {{
-            margin-top: 1.2rem;
-            color: var(--yacht-blue);
-            font-size: clamp(1.2rem, 2.5vw, 2.2rem);
+            color: var(--columbia-navy, #1B3A5C);
+            font-family: inherit;
+            font-size: clamp(2.4rem, 6.5vw, 5.5rem);
             font-weight: 700;
             line-height: 1.2;
+            text-align: center;
+            letter-spacing: 0;
+            border-bottom: 2px solid var(--columbia-brass, #C9A84C);
+            padding-bottom: 0.55rem;
+        }}
+        .maintenance-submessage {{
+            margin-top: 1.35rem;
+            color: var(--columbia-brass-deep, #A8882E);
+            font-family: inherit;
+            font-size: clamp(1.15rem, 2.3vw, 1.9rem);
+            font-weight: 600;
+            line-height: 1.3;
             text-align: center;
             letter-spacing: 0;
         }}
@@ -484,8 +641,11 @@ def require_login() -> None:
     if st.session_state.get("authenticated"):
         return
 
-    st.title("组合管理账户复盘")
-    st.caption("请输入访问密码后继续。")
+    render_hero_banner(
+        "组合管理账户复盘",
+        "请输入访问密码后继续。",
+        kicker="Columbia / Authorized Entry",
+    )
     password = st.text_input("访问密码", type="password")
     if st.button("进入"):
         if hmac.compare_digest(password, expected_password):
@@ -1407,7 +1567,7 @@ def render_bar_chart(
                 if "label" not in threshold_frame.columns:
                     threshold_frame["label"] = threshold_frame["value"].map(lambda value: f"{value:.2%}")
                 if "color" not in threshold_frame.columns:
-                    threshold_frame["color"] = "#C88439"
+                    threshold_frame["color"] = "#C9A84C"
                 threshold_frame["label"] = threshold_frame["label"].astype(str)
                 threshold_frame["color"] = threshold_frame["color"].astype(str)
                 threshold_rules = (
@@ -1785,7 +1945,7 @@ def render_asset_return_completion(data: pd.DataFrame, current_month: str) -> No
                 title=None,
                 scale=alt.Scale(
                     domain=["达标", "低于目标", "高于目标", "无数据"],
-                    range=[POSITIVE_COLOR, NEGATIVE_COLOR, "#C88439", NEUTRAL_COLOR],
+                    range=[POSITIVE_COLOR, NEGATIVE_COLOR, "#C9A84C", NEUTRAL_COLOR],
                 ),
                 legend=alt.Legend(orient="top"),
             ),
@@ -2482,7 +2642,7 @@ def render_monthly_trends(data: pd.DataFrame, comparison_mode: str) -> None:
         ytd_label_finance,
         ytd_label_comprehensive,
     ]
-    income_colors = [NEUTRAL_COLOR, POSITIVE_COLOR, "#C88439", "#0F6F3F"]
+    income_colors = [NEUTRAL_COLOR, POSITIVE_COLOR, "#C9A84C", "#2F6B4F"]
     income_tooltip = [
         alt.Tooltip("snapshot_date:N", title="数据时点"),
         alt.Tooltip("income_type:N", title="收益口径"),
@@ -2700,15 +2860,18 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
 
 
 def main() -> None:
-    apply_yacht_theme()
+    apply_columbia_theme()
     if maintenance_mode_enabled():
         render_maintenance_page()
         return
 
     require_login()
 
-    st.title("组合管理账户复盘")
-    st.caption("看组合规模、收益贡献、数据质量，并追到资产证据。")
+    render_hero_banner(
+        "组合管理账户复盘",
+        "看组合规模、收益贡献、数据质量，并追到资产证据。",
+        kicker="Columbia / Portfolio Review",
+    )
 
     source_signature = data_source_signature(DATA_DIR)
     data, validation, errors = cached_load(
@@ -3002,7 +3165,7 @@ def main() -> None:
             empty_message="当前账户暂无可展示的综合收益率。",
             label_order=account_chart_labels,
             threshold_lines=[
-                {"label": "资金成本率 3.41%", "value": FUNDING_COST_RATE, "color": "#C88439"},
+                {"label": "资金成本率 3.41%", "value": FUNDING_COST_RATE, "color": "#C9A84C"},
             ],
             threshold_color_value=FUNDING_COST_RATE,
             show_value_labels=True,
@@ -3020,7 +3183,7 @@ def main() -> None:
             empty_message="当前账户暂无可展示的财务收益率。",
             label_order=account_chart_labels,
             threshold_lines=[
-                {"label": "有效成本率 3.26%", "value": EFFECTIVE_COST_RATE, "color": "#0F6F3F"},
+                {"label": "有效成本率 3.26%", "value": EFFECTIVE_COST_RATE, "color": "#2F6B4F"},
             ],
             threshold_color_value=EFFECTIVE_COST_RATE,
             show_value_labels=True,
