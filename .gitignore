@@ -1,6 +1,7 @@
 .streamlit/secrets.toml
 .streamlit/local_full_app
 __pycache__/
+.pytest_cache/
 test_tmp/
 *.log
 *.pid
@@ -9,3 +10,6 @@ test_tmp/
 output/
 data/monthly_snapshots/source_cache_extracts/
 data/monthly_snapshots/*.xlsx
+/docs/
+/tools/
+/*agent.md

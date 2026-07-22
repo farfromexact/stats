@@ -8,24 +8,6 @@
 
 这个仓库也可以作为个人页面或作品集案例使用：它展示了从原始 Excel 宽表到交互式分析产品的完整实现，包括数据口径沉淀、指标解释、图表交互、异常提示和资产级别 drill-down。
 
-## 页面预览
-
-### 总体表现与趋势
-
-![总体表现与趋势](docs/readme-assets/overview.jpg)
-
-### 投资品种总览
-
-![投资品种总览](docs/readme-assets/asset-class-overview.jpg)
-
-### 委内/委外比较
-
-![委内委外比较](docs/readme-assets/strategy-book-overview.jpg)
-
-### 账户久期
-
-![账户久期](docs/readme-assets/account-duration-overview.jpg)
-
 ## 核心功能
 
 - **总体复盘**：汇总当前数据时点市值、年初以来收益、平均资金占用、快照行数和数据质量提示。
@@ -44,8 +26,7 @@
 - Excel 仍是本地更新时的权威输入；本地存在 Excel 时，加载器会继续核对源文件哈希，避免忘记重新生成 Parquet。
 - 数据读取与字段标准化在 `portfolio_data.py`。
 - 账户、品种、经理和资产证据汇总在 `account_review.py`。
-- 委内/委外、配置盘/交易盘分类规则在 `strategy_books.py`。
-- rat race 模块的映射说明和 20260630 控制数见 `docs/strategy_book_mapping.md`。
+- 委内/委外、配置盘/交易盘分类规则在 `strategy_books.py`；对应的分类回归和月度快照控制数在 `tests/test_strategy_books.py`。
 - 必需字段、可选字段和标准列名集中维护在 `config.py`。
 
 ## 月度数据更新
@@ -53,7 +34,7 @@
 1. 将新的月末或临时 Excel 宽表放入本地 `data/monthly_snapshots/`，并在文件名中保留完整日期；该文件会被 Git 忽略。
 2. 运行 `python scripts/build_snapshot_parquet.py`，增量更新 `data/snapshot_parquet/*.parquet` 和 `manifest.json`；同日期会替换，其余历史快照会保留。
 3. 运行 `python -m unittest`，确认控制数和读取回归通过。
-4. 只提交 parquet、manifest 以及相关代码或文档变更，不提交 Excel。
+4. 只提交 parquet、manifest 以及相关代码或测试变更，不提交 Excel 和本地分析材料。
 
 ## 本地运行
 
@@ -87,6 +68,5 @@ python -m unittest discover
 ├── config.py                      # 字段映射和全局配置
 ├── data/monthly_snapshots/        # 本地 Excel 构建输入（Git 忽略）
 ├── data/snapshot_parquet/         # Git/部署使用的 Parquet 快照与 manifest
-├── docs/strategy_book_mapping.md  # rat race 口径文档
 └── tests/                         # 分类规则与控制数测试
 ```
