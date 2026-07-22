@@ -74,6 +74,114 @@ class ParquetSnapshotLoaderTest(unittest.TestCase):
         self.assertEqual(manifest["snapshots"][0]["snapshot_date"], "2026-06-30")
         self.assertEqual(manifest["snapshots"][0]["snapshot_status"], SNAPSHOT_STATUS_OFFICIAL)
         self.assertEqual(manifest["snapshots"][0]["parquet_file"], "2026-06-30.parquet")
+        self.assertRegex(manifest["snapshots"][0]["parquet_file_hash"], r"^[0-9a-f]{64}$")
+
+    def test_load_snapshots_works_without_excel_sources(self):
+        build_snapshot_parquet(self.data_dir)
+        shutil.rmtree(self.data_dir)
+
+        with mock.patch("portfolio_data._read_one", side_effect=AssertionError("Excel fallback used")):
+            data, validation, errors = load_snapshots(self.data_dir)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(data), 1)
+        self.assertEqual(len(validation), 1)
+        self.assertEqual(float(data["full_market_value"].iloc[0]), 1.0)
+
+    def test_parquet_only_load_fails_closed_without_manifest(self):
+        build_snapshot_parquet(self.data_dir)
+        snapshot_parquet_manifest_path(self.data_dir).unlink()
+        shutil.rmtree(self.data_dir)
+
+        data, validation, errors = load_snapshots(self.data_dir)
+
+        self.assertTrue(data.empty)
+        self.assertTrue(validation.empty)
+        self.assertIn("Parquet", errors[0])
+
+    def test_parquet_only_load_fails_closed_when_file_is_corrupt(self):
+        build_snapshot_parquet(self.data_dir)
+        manifest = json.loads(snapshot_parquet_manifest_path(self.data_dir).read_text(encoding="utf-8"))
+        parquet_name = manifest["snapshots"][0]["parquet_file"]
+        (snapshot_parquet_dir(self.data_dir) / parquet_name).write_bytes(b"not parquet")
+        shutil.rmtree(self.data_dir)
+
+        data, validation, errors = load_snapshots(self.data_dir)
+
+        self.assertTrue(data.empty)
+        self.assertTrue(validation.empty)
+        self.assertIn("Parquet", errors[0])
+
+    def test_parquet_only_load_fails_closed_when_required_column_is_missing(self):
+        manifest_path = build_snapshot_parquet(self.data_dir)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entry = manifest["snapshots"][0]
+        parquet_path = snapshot_parquet_dir(self.data_dir) / entry["parquet_file"]
+        frame = pd.read_parquet(parquet_path).drop(columns=["asset_key"])
+        frame.to_parquet(parquet_path, index=False)
+        entry["parquet_file_hash"] = portfolio_data._file_hash(parquet_path)
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        shutil.rmtree(self.data_dir)
+
+        data, validation, errors = load_snapshots(self.data_dir)
+
+        self.assertTrue(data.empty)
+        self.assertTrue(validation.empty)
+        self.assertIn("Parquet", errors[0])
+
+    def test_parquet_only_load_rejects_unsafe_manifest_path(self):
+        manifest_path = build_snapshot_parquet(self.data_dir)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["snapshots"][0]["parquet_file"] = "../2026-06-30.parquet"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        shutil.rmtree(self.data_dir)
+
+        data, validation, errors = load_snapshots(self.data_dir)
+
+        self.assertTrue(data.empty)
+        self.assertTrue(validation.empty)
+        self.assertIn("Parquet", errors[0])
+
+    def test_parquet_only_load_fails_closed_on_invalid_utf8_manifest(self):
+        manifest_path = build_snapshot_parquet(self.data_dir)
+        manifest_path.write_bytes(b"\xff\xfe\xfd")
+        shutil.rmtree(self.data_dir)
+
+        data, validation, errors = load_snapshots(self.data_dir)
+
+        self.assertTrue(data.empty)
+        self.assertTrue(validation.empty)
+        self.assertIn("Parquet", errors[0])
+
+    def test_builder_preserves_history_when_only_new_excel_is_local(self):
+        first_manifest_path = build_snapshot_parquet(self.data_dir)
+        first_manifest = json.loads(first_manifest_path.read_text(encoding="utf-8"))
+        first_entry = first_manifest["snapshots"][0]
+        first_parquet_hash = first_entry["parquet_file_hash"]
+
+        self.snapshot_path.unlink()
+        july_path = self.data_dir / "snapshot 20260731.xlsx"
+        self.write_snapshot(2.0, july_path)
+        second_manifest_path = build_snapshot_parquet(self.data_dir)
+        second_manifest = json.loads(second_manifest_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            [entry["snapshot_date"] for entry in second_manifest["snapshots"]],
+            ["2026-06-30", "2026-07-31"],
+        )
+        self.assertEqual(second_manifest["snapshots"][0]["parquet_file_hash"], first_parquet_hash)
+
+        with mock.patch("portfolio_data._read_one", side_effect=AssertionError("Excel fallback used")):
+            data, validation, errors = load_snapshots(self.data_dir)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(validation), 2)
+        self.assertEqual(sorted(data["snapshot_date"].unique().tolist()), ["2026-06-30", "2026-07-31"])
+
+        shutil.rmtree(self.data_dir)
+        data, validation, errors = load_snapshots(self.data_dir)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(validation), 2)
+        self.assertEqual(len(data), 2)
 
     def test_same_month_snapshots_remain_separate(self):
         interim = self.data_dir / "snapshot 20260716.xlsx"
@@ -105,6 +213,12 @@ class ParquetSnapshotLoaderTest(unittest.TestCase):
         self.assertTrue(data.empty)
         self.assertIn("2026-06-30", errors[0])
         with self.assertRaisesRegex(RuntimeError, "Duplicate snapshot date"):
+            build_snapshot_parquet(self.data_dir)
+
+    def test_builder_rejects_snapshot_without_data_rows(self):
+        pd.DataFrame(columns=REQUIRED_FIELDS).to_excel(self.snapshot_path, index=False)
+
+        with self.assertRaisesRegex(RuntimeError, "no data rows"):
             build_snapshot_parquet(self.data_dir)
 
     def test_load_snapshots_falls_back_when_manifest_missing(self):

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import re
 from calendar import monthrange
 from datetime import datetime
@@ -11,7 +12,7 @@ from config import DATA_DIR, FIELD_MAP, NUMERIC_COLUMNS, OPTIONAL_FIELDS, REQUIR
 
 
 DATE_TOKEN = re.compile(r"(20\d{6})")
-PARQUET_MANIFEST_VERSION = "snapshot-parquet-v2"
+PARQUET_MANIFEST_VERSION = "snapshot-parquet-v3"
 PARQUET_DIR_NAME = "snapshot_parquet"
 PARQUET_MANIFEST_NAME = "manifest.json"
 SNAPSHOT_STATUS_OFFICIAL = "official"
@@ -23,6 +24,17 @@ OPTIONAL_FIELD_DEFAULTS = {
     "资产分类二级": "",
     "资产分类三级": "",
     "交易策略": "",
+}
+
+PARQUET_REQUIRED_COLUMNS = {
+    "snapshot_date",
+    "snapshot_month",
+    "snapshot_status",
+    "source_file_hash",
+    "source_file_name",
+    "source_row_no",
+    "asset_key",
+    *(FIELD_MAP[field] for field in REQUIRED_FIELDS + OPTIONAL_FIELDS),
 }
 
 
@@ -207,12 +219,22 @@ def _manifest_entry_to_log(entry: dict) -> dict:
 
 
 def _parquet_frame_matches_manifest(frame: pd.DataFrame, entry: dict) -> bool:
-    if len(frame) != int(entry.get("source_rows", -1)):
+    try:
+        expected_rows = int(entry.get("source_rows", -1))
+    except (TypeError, ValueError):
+        return False
+    if expected_rows <= 0 or len(frame) != expected_rows:
+        return False
+    if not PARQUET_REQUIRED_COLUMNS.issubset(frame.columns):
         return False
 
-    for column in ["snapshot_date", "snapshot_month", "snapshot_status"]:
-        if column not in frame.columns:
-            return False
+    for column in [
+        "snapshot_date",
+        "snapshot_month",
+        "snapshot_status",
+        "source_file_name",
+        "source_file_hash",
+    ]:
         actual_values = frame[column].dropna().astype(str).unique().tolist()
         if actual_values != [str(entry.get(column, ""))]:
             return False
@@ -222,54 +244,127 @@ def _parquet_frame_matches_manifest(frame: pd.DataFrame, entry: dict) -> bool:
         ("finance_income_mtd", "finance_income_mtd"),
         ("comprehensive_income_mtd", "comprehensive_income_mtd"),
     ]:
-        if column not in frame.columns:
+        values = pd.to_numeric(frame[column], errors="coerce")
+        if values.isna().any() or not all(math.isfinite(float(value)) for value in values):
             return False
-        actual = float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).sum())
-        expected = float(entry.get(manifest_key, 0.0))
+        actual = float(values.sum())
+        try:
+            expected = float(entry.get(manifest_key, 0.0))
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(expected):
+            return False
         if abs(actual - expected) > 1e-6:
             return False
     return True
 
 
-def _load_parquet_snapshots(data_dir: Path, files: list[Path]) -> tuple[pd.DataFrame, pd.DataFrame, list[str]] | None:
+def _validated_manifest_entries(manifest: dict) -> list[dict] | None:
+    if not isinstance(manifest, dict):
+        return None
+    if manifest.get("manifest_version") != PARQUET_MANIFEST_VERSION:
+        return None
+    entries = manifest.get("snapshots")
+    if not isinstance(entries, list) or not entries:
+        return None
+
+    seen_dates: set[str] = set()
+    seen_sources: set[str] = set()
+    seen_parquet_files: set[str] = set()
+    validated: list[dict] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return None
+
+        source_name = str(entry.get("source_file_name", ""))
+        parquet_name = str(entry.get("parquet_file", ""))
+        snapshot_date = str(entry.get("snapshot_date", ""))
+        if not source_name or Path(source_name).name != source_name:
+            return None
+        if not parquet_name or Path(parquet_name).name != parquet_name:
+            return None
+        if parquet_name != f"{snapshot_date}.parquet":
+            return None
+        if _snapshot_date(source_name) != snapshot_date:
+            return None
+        if entry.get("snapshot_month") != snapshot_date[:7]:
+            return None
+        if entry.get("snapshot_status") != _snapshot_status(snapshot_date):
+            return None
+
+        source_hash = str(entry.get("source_file_hash", ""))
+        parquet_hash = str(entry.get("parquet_file_hash", ""))
+        if re.fullmatch(r"[0-9a-f]{64}", source_hash) is None:
+            return None
+        if re.fullmatch(r"[0-9a-f]{64}", parquet_hash) is None:
+            return None
+
+        try:
+            source_rows = int(entry.get("source_rows", -1))
+            control_totals = [
+                float(entry.get("full_market_value")),
+                float(entry.get("finance_income_mtd")),
+                float(entry.get("comprehensive_income_mtd")),
+            ]
+        except (TypeError, ValueError):
+            return None
+        if source_rows <= 0 or not all(math.isfinite(value) for value in control_totals):
+            return None
+
+        if snapshot_date in seen_dates or source_name in seen_sources or parquet_name in seen_parquet_files:
+            return None
+        seen_dates.add(snapshot_date)
+        seen_sources.add(source_name)
+        seen_parquet_files.add(parquet_name)
+        validated.append(entry)
+
+    return sorted(validated, key=lambda entry: str(entry["snapshot_date"]))
+
+
+def _load_parquet_snapshots(
+    data_dir: Path,
+    files: list[Path] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]] | None:
     manifest_path = snapshot_parquet_manifest_path(data_dir)
     if not manifest_path.exists():
         return None
 
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
 
-    if manifest.get("manifest_version") != PARQUET_MANIFEST_VERSION:
-        return None
-    entries = manifest.get("snapshots")
-    if not isinstance(entries, list):
+    entries = _validated_manifest_entries(manifest)
+    if entries is None:
         return None
 
+    files = list(files or [])
     entries_by_name = {str(entry.get("source_file_name", "")): entry for entry in entries}
-    if set(entries_by_name) != {path.name for path in files}:
-        return None
+    if files:
+        local_source_names = {path.name for path in files}
+        if not local_source_names.issubset(entries_by_name):
+            return None
+        try:
+            if any(entries_by_name[path.name]["source_file_hash"] != _file_hash(path) for path in files):
+                return None
+        except OSError:
+            return None
 
     parquet_dir = snapshot_parquet_dir(data_dir)
+    expected_parquet_files = {str(entry["parquet_file"]) for entry in entries}
+    actual_parquet_files = {path.name for path in parquet_dir.glob("*.parquet")}
+    if actual_parquet_files != expected_parquet_files:
+        return None
+
     frames: list[pd.DataFrame] = []
     logs: list[dict] = []
-    for path in files:
-        entry = entries_by_name[path.name]
-        snapshot_date = _snapshot_date(path.name)
-        snapshot_status = _snapshot_status(snapshot_date)
-        if entry.get("snapshot_date") != snapshot_date:
-            return None
-        if entry.get("snapshot_month") != _snapshot_month(path.name):
-            return None
-        if entry.get("snapshot_status") != snapshot_status:
-            return None
-        if entry.get("source_file_hash") != _file_hash(path):
-            return None
-        parquet_file = parquet_dir / str(entry.get("parquet_file", ""))
+    for entry in entries:
+        parquet_file = parquet_dir / str(entry["parquet_file"])
         if not parquet_file.exists():
             return None
         try:
+            if _file_hash(parquet_file) != entry["parquet_file_hash"]:
+                return None
             frame = pd.read_parquet(parquet_file)
         except Exception:
             return None
@@ -288,22 +383,27 @@ def load_snapshots(
     prefer_parquet: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     files = discover_snapshot_files(data_dir)
-    if not files:
-        return pd.DataFrame(), pd.DataFrame(), [f"未在 {data_dir} 找到带 YYYYMMDD 日期的 .xlsx 月度宽表。"]
-
-    snapshot_dates = [_snapshot_date(path.name) for path in files]
-    duplicate_dates = sorted({date for date in snapshot_dates if date and snapshot_dates.count(date) > 1})
-    if duplicate_dates:
-        return (
-            pd.DataFrame(),
-            pd.DataFrame(),
-            ["同一数据时点存在多个源文件，请只保留一份：" + "、".join(duplicate_dates)],
-        )
+    if files:
+        snapshot_dates = [_snapshot_date(path.name) for path in files]
+        duplicate_dates = sorted({date for date in snapshot_dates if date and snapshot_dates.count(date) > 1})
+        if duplicate_dates:
+            return (
+                pd.DataFrame(),
+                pd.DataFrame(),
+                ["同一数据时点存在多个源文件，请只保留一份：" + "、".join(duplicate_dates)],
+            )
 
     if prefer_parquet:
         parquet_result = _load_parquet_snapshots(data_dir, files)
         if parquet_result is not None:
             return parquet_result
+
+    if not files:
+        return (
+            pd.DataFrame(),
+            pd.DataFrame(),
+            [f"未找到可用且通过校验的 Parquet 快照缓存，且本地没有 Excel 快照可回退：{data_dir}"],
+        )
 
     frames: list[pd.DataFrame] = []
     logs: list[dict] = []

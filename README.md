@@ -38,9 +38,10 @@
 
 ## 数据与口径
 
-- 月末正式版和临时中间版快照均放在 `data/monthly_snapshots/`；文件名必须含 `YYYYMMDD`。
+- 月末正式版和临时中间版 Excel 均只放在本地 `data/monthly_snapshots/`；文件名必须含 `YYYYMMDD`，该目录下的 Excel 不提交到 Git。
 - 页面以完整日期作为唯一分析键，并明确显示“月末正式版”或“临时中间版”；`snapshot_month` 只保留为所属月份标签。
-- 加速读取文件放在 `data/snapshot_parquet/`，由源 Excel 转换生成；Excel 仍是权威源。
+- Git 和 Streamlit Cloud 以 `data/snapshot_parquet/` 中的 Parquet 与 `manifest.json` 作为发布数据；manifest 会校验文件哈希、快照身份、行数和控制数。
+- Excel 仍是本地更新时的权威输入；本地存在 Excel 时，加载器会继续核对源文件哈希，避免忘记重新生成 Parquet。
 - 数据读取与字段标准化在 `portfolio_data.py`。
 - 账户、品种、经理和资产证据汇总在 `account_review.py`。
 - 委内/委外、配置盘/交易盘分类规则在 `strategy_books.py`。
@@ -49,10 +50,10 @@
 
 ## 月度数据更新
 
-1. 将新的月末或临时 Excel 宽表放入 `data/monthly_snapshots/`，并在文件名中保留完整日期。
-2. 运行 `python scripts/build_snapshot_parquet.py`，更新 `data/snapshot_parquet/*.parquet` 和 `manifest.json`。
+1. 将新的月末或临时 Excel 宽表放入本地 `data/monthly_snapshots/`，并在文件名中保留完整日期；该文件会被 Git 忽略。
+2. 运行 `python scripts/build_snapshot_parquet.py`，增量更新 `data/snapshot_parquet/*.parquet` 和 `manifest.json`；同日期会替换，其余历史快照会保留。
 3. 运行 `python -m unittest`，确认控制数和读取回归通过。
-4. 提交 Excel、parquet、manifest 以及相关代码或文档变更。
+4. 只提交 parquet、manifest 以及相关代码或文档变更，不提交 Excel。
 
 ## 本地运行
 
@@ -64,6 +65,9 @@ PORTFOLIO_APP_PASSWORD=your-password streamlit run app.py
 ```
 
 然后打开 `http://localhost:8501`，输入 `PORTFOLIO_APP_PASSWORD` 配置的访问密码。
+
+Streamlit Cloud 部署时，在应用 Secrets 中配置 `app_password`；仓库本身不保存密码。
+应用默认显示密码登录页；只有显式配置 `maintenance_mode = true` 时才进入维护页。
 
 ## 验证
 
@@ -81,7 +85,8 @@ python -m unittest discover
 ├── account_review.py              # 账户/品种/经理汇总与资产证据
 ├── strategy_books.py              # 委内/委外与配置盘/交易盘分类
 ├── config.py                      # 字段映射和全局配置
-├── data/monthly_snapshots/        # 月度组合宽表
+├── data/monthly_snapshots/        # 本地 Excel 构建输入（Git 忽略）
+├── data/snapshot_parquet/         # Git/部署使用的 Parquet 快照与 manifest
 ├── docs/strategy_book_mapping.md  # rat race 口径文档
 └── tests/                         # 分类规则与控制数测试
 ```
