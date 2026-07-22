@@ -8,3 +8,4 @@ test_tmp/
 .streamlit_boot_log.txt
 output/
 data/monthly_snapshots/source_cache_extracts/
+data/monthly_snapshots/*.xlsx
