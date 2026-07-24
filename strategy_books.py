@@ -7,7 +7,7 @@ import pandas as pd
 INTERNAL_MANDATE = "委托资管"
 RETURN_BASE_THRESHOLD = 0.0001
 EXCLUDED_STRATEGY_BOOK = "流动性/其他未纳入五类"
-STRATEGY_CLASSIFICATION_VERSION = "2026-07-18-v2"
+STRATEGY_CLASSIFICATION_VERSION = "2026-07-24-v3"
 
 INTERNAL_STRATEGY_BOOK_ORDER = [
     "固收-配置盘",
@@ -68,6 +68,7 @@ EQUITY_TRADING_CLASSES = {
     "股票型保险资管产品",
     "混合型保险资管产品",
 }
+INTERNAL_EQUITY_PRODUCT_CLASSES = EQUITY_TRADING_CLASSES - {"股票"}
 OUTSOURCED_EQUITY_HOLDING_CLASSES = {
     "股票",
     "股票型基金",
@@ -131,6 +132,32 @@ OUTSOURCED_EQUITY_BOOKS = {
     "太保投资香港",
     "国寿富兰克林",
 }
+OUTSOURCED_EQUITY_DASHBOARD_LABELS = {
+    "富国权益": "委外-富国",
+    "华泰权益": "委外-华泰",
+    "华夏基金权益": "委外-华夏基金",
+    "国泰海通权益": "委外-国泰海通",
+    "大成基金权益": "委外-大成基金",
+    "广发基金权益": "委外-广发基金",
+    "太平资产香港": "委外-太平资产香港",
+    "太保投资香港": "委外-太保投资香港",
+    "国寿富兰克林": "委外-国寿富兰克林",
+}
+OUTSOURCED_EQUITY_DASHBOARD_ORDER = [
+    label for label in EXTERNAL_STRATEGY_BOOK_ORDER if label in OUTSOURCED_EQUITY_BOOKS
+]
+EQUITY_DASHBOARD_INTERNAL_GROUPS = [
+    ("internal_stock", "委内-股票"),
+    ("internal_equity_products", "委内-权益产品"),
+    ("internal_oci_stock", "委内-OCI股票"),
+]
+EQUITY_DASHBOARD_LABEL_ORDER = [
+    *[display_label for _, display_label in EQUITY_DASHBOARD_INTERNAL_GROUPS],
+    *[
+        OUTSOURCED_EQUITY_DASHBOARD_LABELS[strategy_book]
+        for strategy_book in OUTSOURCED_EQUITY_DASHBOARD_ORDER
+    ],
+]
 OUTSOURCED_FULL_ACCOUNT_BOOKS = {
     *OUTSOURCED_EQUITY_BOOKS,
     *OUTSOURCED_FULL_ACCOUNT_MANDATE_BOOKS.values(),
@@ -509,6 +536,93 @@ def _aggregate_current(frame: pd.DataFrame, group_cols: list[str], comparison_mo
     )
     return summary
 
+
+def equity_dashboard_summary(
+    data: pd.DataFrame,
+    current_month: str,
+    comparison_mode: str,
+) -> pd.DataFrame:
+    current = _current_strategy_slice(data, current_month)
+    internal = current[
+        current["mandate_type"].eq(INTERNAL_MANDATE)
+        & current["asset_major_class"].eq("权益")
+    ].copy()
+    internal_oci_mask = (
+        internal["asset_class"].eq("股票")
+        & internal["manager"].eq("鲍淼")
+        & internal["trade_strategy"].eq("配置")
+    )
+
+    internal_slices = {
+        "internal_stock": internal[
+            internal["asset_class"].eq("股票") & ~internal_oci_mask
+        ].copy(),
+        "internal_equity_products": internal[
+            internal["asset_class"].isin(INTERNAL_EQUITY_PRODUCT_CLASSES)
+        ].copy(),
+        "internal_oci_stock": internal[internal_oci_mask].copy(),
+    }
+
+    grouped_frames: list[pd.DataFrame] = []
+    internal_labels = dict(EQUITY_DASHBOARD_INTERNAL_GROUPS)
+    for group_key, frame in internal_slices.items():
+        frame["equity_scope"] = "委内"
+        frame["equity_group"] = group_key
+        frame["equity_group_display_label"] = internal_labels[group_key]
+        grouped_frames.append(frame)
+
+    outsourced = outsourced_equity_holding_slice(current)
+    outsourced = outsourced[
+        outsourced["strategy_book"].isin(OUTSOURCED_EQUITY_DASHBOARD_ORDER)
+    ].copy()
+    outsourced["equity_scope"] = "委外"
+    outsourced["equity_group"] = outsourced["strategy_book"]
+    outsourced["equity_group_display_label"] = outsourced["strategy_book"].map(
+        OUTSOURCED_EQUITY_DASHBOARD_LABELS
+    )
+    grouped_frames.append(outsourced)
+
+    group_cols = ["equity_scope", "equity_group", "equity_group_display_label"]
+    combined = pd.concat(grouped_frames, ignore_index=True)
+    summary = _aggregate_current(combined, group_cols, comparison_mode)
+
+    template_rows = [
+        {
+            "equity_scope": "委内",
+            "equity_group": group_key,
+            "equity_group_display_label": display_label,
+            "_equity_dashboard_order": order,
+        }
+        for order, (group_key, display_label) in enumerate(EQUITY_DASHBOARD_INTERNAL_GROUPS)
+    ]
+    template_rows.extend(
+        {
+            "equity_scope": "委外",
+            "equity_group": strategy_book,
+            "equity_group_display_label": OUTSOURCED_EQUITY_DASHBOARD_LABELS[strategy_book],
+            "_equity_dashboard_order": order,
+        }
+        for order, strategy_book in enumerate(
+            OUTSOURCED_EQUITY_DASHBOARD_ORDER,
+            start=len(EQUITY_DASHBOARD_INTERNAL_GROUPS),
+        )
+    )
+    template = pd.DataFrame(template_rows)
+    result = template.merge(summary, on=group_cols, how="left")
+
+    for column in [
+        "full_market_value_current",
+        "finance_income_mtd_current",
+        "comprehensive_income_mtd_current",
+        "avg_capital_mtd_current",
+        "record_count_current",
+    ]:
+        result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0.0)
+    result["record_count_current"] = result["record_count_current"].astype(int)
+    for column in ["finance_return_mtd", "comprehensive_return_mtd"]:
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+
+    return result.sort_values("_equity_dashboard_order").reset_index(drop=True)
 
 def strategy_book_summary(data: pd.DataFrame, current_month: str, comparison_mode: str) -> pd.DataFrame:
     current = _current_strategy_slice(data, current_month)
