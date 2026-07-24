@@ -5,10 +5,12 @@ import pandas as pd
 from config import DATA_DIR
 from portfolio_data import load_snapshots
 from strategy_books import (
+    EQUITY_DASHBOARD_LABEL_ORDER,
     EXCLUDED_STRATEGY_BOOK,
     assign_strategy_book_columns,
     classify_strategy_book,
     ensure_strategy_book_columns,
+    equity_dashboard_summary,
     exclusion_reason,
     outsourced_equity_holding_slice,
     outsourced_equity_holding_type,
@@ -327,6 +329,153 @@ class StrategyBookClassificationTest(unittest.TestCase):
         self.assertIn("已改用顶层产品汇总行", result.loc["七月底层", "strategy_book_exclusion_reason"])
 
 
+    def test_equity_dashboard_summary_uses_fixed_groups_and_exact_oci_scope(self):
+        def dashboard_row(asset_name, **overrides):
+            base = row(
+                snapshot_date="2026-07-23",
+                snapshot_month="2026-07",
+                asset_name=asset_name,
+                full_market_value=1.0,
+                avg_capital_mtd=1.0,
+                avg_capital_ytd=1.0,
+                finance_income_mtd=0.01,
+                comprehensive_income_mtd=0.02,
+                finance_income_ytd=0.05,
+                comprehensive_income_ytd=0.10,
+            )
+            base.update(overrides)
+            return base
+
+        frame = pd.DataFrame(
+            [
+                dashboard_row(
+                    "鲍淼OCI",
+                    asset_major_class="权益",
+                    trade_strategy="配置",
+                    asset_class="股票",
+                    manager="鲍淼",
+                    full_market_value=10.0,
+                    avg_capital_ytd=10.0,
+                    comprehensive_income_ytd=1.0,
+                ),
+                dashboard_row(
+                    "鲍淼2普通股票",
+                    asset_major_class="权益",
+                    trade_strategy="配置",
+                    asset_class="股票",
+                    manager="鲍淼2",
+                    full_market_value=3.0,
+                    avg_capital_ytd=3.0,
+                    comprehensive_income_ytd=0.6,
+                ),
+                dashboard_row(
+                    "鲍淼交易股票",
+                    asset_major_class="权益",
+                    trade_strategy="交易",
+                    asset_class="股票",
+                    manager="鲍淼（交易）",
+                    full_market_value=4.0,
+                    avg_capital_ytd=4.0,
+                    comprehensive_income_ytd=0.4,
+                ),
+                *[
+                    dashboard_row(
+                        asset_class,
+                        asset_major_class="权益",
+                        trade_strategy="交易",
+                        asset_class=asset_class,
+                    )
+                    for asset_class in [
+                        "股票型基金",
+                        "混合型基金",
+                        "股票型保险资管产品",
+                        "混合型保险资管产品",
+                    ]
+                ],
+                dashboard_row(
+                    "长股投排除",
+                    asset_major_class="权益",
+                    trade_strategy="长股投",
+                    asset_class="长股投股票",
+                    manager="鲍淼",
+                    full_market_value=5.0,
+                ),
+                dashboard_row(
+                    "华泰股票",
+                    mandate_type="委托华泰",
+                    asset_class="股票",
+                    full_market_value=2.0,
+                ),
+                dashboard_row(
+                    "华泰现金排除",
+                    mandate_type="委托华泰",
+                    asset_class="活期存款",
+                    full_market_value=4.0,
+                ),
+                dashboard_row(
+                    "太保未上市股权",
+                    mandate_type="委托太保投资香港",
+                    asset_class="未上市企业股权",
+                    full_market_value=3.0,
+                ),
+                dashboard_row(
+                    "太保股权基金",
+                    mandate_type="委托太保投资香港",
+                    asset_class="股权基金",
+                    full_market_value=1.0,
+                ),
+            ]
+        )
+
+        summary = equity_dashboard_summary(frame, "2026-07-23", "年初以来")
+        indexed = summary.set_index("equity_group_display_label")
+
+        self.assertEqual(summary["equity_group_display_label"].tolist(), EQUITY_DASHBOARD_LABEL_ORDER)
+        self.assertEqual(len(summary), 12)
+        self.assertAlmostEqual(indexed.loc["委内-股票", "full_market_value_current"], 7.0)
+        self.assertEqual(indexed.loc["委内-股票", "record_count_current"], 2)
+        self.assertAlmostEqual(indexed.loc["委内-OCI股票", "full_market_value_current"], 10.0)
+        self.assertEqual(indexed.loc["委内-OCI股票", "record_count_current"], 1)
+        self.assertAlmostEqual(indexed.loc["委内-权益产品", "full_market_value_current"], 4.0)
+        self.assertAlmostEqual(indexed.loc["委外-华泰", "full_market_value_current"], 2.0)
+        self.assertAlmostEqual(indexed.loc["委外-太保投资香港", "full_market_value_current"], 4.0)
+        self.assertAlmostEqual(indexed.loc["委外-国寿富兰克林", "full_market_value_current"], 0.0)
+        self.assertTrue(pd.isna(indexed.loc["委外-国寿富兰克林", "comprehensive_return_mtd"]))
+
+    def test_equity_dashboard_summary_switches_period_metrics(self):
+        frame = pd.DataFrame(
+            [
+                row(
+                    snapshot_date="2026-07-23",
+                    snapshot_month="2026-07",
+                    asset_name="测试股票型基金",
+                    asset_major_class="权益",
+                    trade_strategy="交易",
+                    asset_class="股票型基金",
+                    full_market_value=8.0,
+                    avg_capital_mtd=2.0,
+                    avg_capital_ytd=6.0,
+                    finance_income_mtd=0.5,
+                    comprehensive_income_mtd=1.0,
+                    finance_income_ytd=1.5,
+                    comprehensive_income_ytd=3.0,
+                )
+            ]
+        )
+
+        monthly = equity_dashboard_summary(frame, "2026-07-23", "单月复盘").set_index(
+            "equity_group_display_label"
+        )
+        ytd = equity_dashboard_summary(frame, "2026-07-23", "年初以来").set_index(
+            "equity_group_display_label"
+        )
+
+        self.assertAlmostEqual(monthly.loc["委内-权益产品", "comprehensive_income_mtd_current"], 1.0)
+        self.assertAlmostEqual(monthly.loc["委内-权益产品", "comprehensive_return_mtd"], 0.5)
+        self.assertAlmostEqual(ytd.loc["委内-权益产品", "comprehensive_income_mtd_current"], 3.0)
+        self.assertAlmostEqual(ytd.loc["委内-权益产品", "comprehensive_return_mtd"], 0.5)
+
+
 class StrategyBookActualSnapshotTest(unittest.TestCase):
     def assert_control_totals(self, month, expected):
         data, _, errors = load_snapshots(DATA_DIR)
@@ -418,6 +567,52 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
                 "国寿富兰克林": 8.341285,
             },
         )
+
+    def test_20260723_equity_dashboard_controls(self):
+        data, _, errors = load_snapshots(DATA_DIR)
+        self.assertEqual(errors, [])
+        summary = equity_dashboard_summary(data, "2026-07-23", "年初以来").set_index(
+            "equity_group_display_label"
+        )
+        expected_market_values = {
+            "委内-股票": 128.3823312035,
+            "委内-权益产品": 227.2276287323,
+            "委内-OCI股票": 408.6174452043,
+            "委外-富国": 4.5509548101,
+            "委外-华泰": 5.1347308957,
+            "委外-华夏基金": 2.8016626223,
+            "委外-国泰海通": 3.8092182366,
+            "委外-大成基金": 1.5829507944,
+            "委外-广发基金": 2.7844222937,
+            "委外-太平资产香港": 1.7497896485,
+            "委外-太保投资香港": 2.9822281950,
+            "委外-国寿富兰克林": 0.0,
+        }
+        expected_comprehensive_income = {
+            "委内-股票": -14.7709466097,
+            "委内-权益产品": 8.4853370217,
+            "委内-OCI股票": 15.3142426560,
+            "委外-富国": -0.0628327534,
+            "委外-华泰": 0.2707341040,
+            "委外-华夏基金": -0.1817457536,
+            "委外-国泰海通": -0.4431840354,
+            "委外-大成基金": 0.0740532090,
+            "委外-广发基金": -0.1428590069,
+            "委外-太平资产香港": -0.6019822658,
+            "委外-太保投资香港": -0.8854345953,
+            "委外-国寿富兰克林": 0.0,
+        }
+
+        self.assertEqual(summary.index.tolist(), EQUITY_DASHBOARD_LABEL_ORDER)
+        for label, expected in expected_market_values.items():
+            self.assertAlmostEqual(summary.loc[label, "full_market_value_current"], expected, places=6)
+        for label, expected in expected_comprehensive_income.items():
+            self.assertAlmostEqual(
+                summary.loc[label, "comprehensive_income_mtd_current"],
+                expected,
+                places=6,
+            )
+        self.assertTrue(pd.isna(summary.loc["委外-国寿富兰克林", "comprehensive_return_mtd"]))
 
     def test_20260630_outsourced_equity_holding_total(self):
         data, _, errors = load_snapshots(DATA_DIR)

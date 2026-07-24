@@ -34,9 +34,11 @@ asset_evidence_year_open = account_review_module.asset_evidence_year_open
 comparison_summary = account_review_module.comparison_summary
 assign_strategy_book_columns = strategy_books_module.assign_strategy_book_columns
 STRATEGY_CLASSIFICATION_VERSION = strategy_books_module.STRATEGY_CLASSIFICATION_VERSION
+EQUITY_DASHBOARD_LABEL_ORDER = strategy_books_module.EQUITY_DASHBOARD_LABEL_ORDER
 EXTERNAL_STRATEGY_BOOK_ORDER = strategy_books_module.EXTERNAL_STRATEGY_BOOK_ORDER
 OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER = strategy_books_module.OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER
 STRATEGY_BOOK_LABEL_ORDER = strategy_books_module.STRATEGY_BOOK_LABEL_ORDER
+equity_dashboard_summary = strategy_books_module.equity_dashboard_summary
 excluded_strategy_book_detail = strategy_books_module.excluded_strategy_book_detail
 outsourced_equity_holding_slice = strategy_books_module.outsourced_equity_holding_slice
 strategy_book_detail_summary = strategy_books_module.strategy_book_detail_summary
@@ -733,6 +735,8 @@ DISPLAY_NAMES = {
     "strategy_book_item": "明细展示",
     "strategy_book_exclusion_reason": "未纳入原因",
     "outsourced_equity_holding_type": "权益类型",
+    "equity_scope": "范围",
+    "equity_group_display_label": "比较项",
 }
 
 YTD_DISPLAY_OVERRIDES = {
@@ -1218,6 +1222,7 @@ def sidebar_nav() -> None:
         <a class="sidebar-nav-button" href="#overview">总体表现</a>
         <a class="sidebar-nav-button" href="#charts-overview">图表总览</a>
         <a class="sidebar-nav-button" href="#asset-class-overview">投资品种图表/表格</a>
+        <a class="sidebar-nav-button" href="#equity-dashboard">股票专项看板</a>
         <a class="sidebar-nav-button" href="#strategy-book-overview">委内/委外比较</a>
         <a class="sidebar-nav-button" href="#account-overview">账户层图表/表格</a>
         <a class="sidebar-nav-button" href="#duration-overview">账户久期</a>
@@ -1649,6 +1654,157 @@ def render_bar_chart(
         chart_layers = chart_layers + positive_value_labels + negative_value_labels
     chart = (
         chart_layers
+        .properties(title=title, height=_bar_height(len(chart_data)))
+        .configure_view(strokeWidth=0)
+        .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+    )
+    st.altair_chart(chart, width="stretch")
+
+
+def render_equity_dashboard_bar_chart(
+    frame: pd.DataFrame,
+    metric: str,
+    title: str,
+    value_title: str,
+    comparison_mode: str,
+) -> None:
+    chart_data = frame.copy()
+    chart_data["_label"] = chart_data["equity_group_display_label"].astype(str)
+    chart_data["_value"] = pd.to_numeric(chart_data[metric], errors="coerce")
+    chart_data["_value_missing"] = chart_data["_value"].isna()
+    chart_data["_plot_value"] = chart_data["_value"].fillna(0.0)
+    chart_data["_value_label"] = chart_data["_plot_value"].map(
+        lambda value: f"{value:.2%}" if metric in PCT_COLUMNS else f"{value:,.2f}"
+    )
+    chart_data.loc[chart_data["_value_missing"], "_value_label"] = "—"
+    chart_data["_bar_color_group"] = np.where(chart_data["_plot_value"] < 0, "负向", "正向")
+
+    valid_values = chart_data.loc[~chart_data["_value_missing"], "_plot_value"]
+    min_value = min(float(valid_values.min()) if not valid_values.empty else 0.0, 0.0)
+    max_value = max(float(valid_values.max()) if not valid_values.empty else 0.0, 0.0)
+    minimum_span = 0.01 if metric in PCT_COLUMNS else 1.0
+    span = max(max_value - min_value, abs(min_value), abs(max_value), minimum_span)
+    padding = span * 0.08
+    if min_value >= 0:
+        domain = [0.0, max_value + padding]
+    elif max_value <= 0:
+        domain = [min_value - padding, 0.0]
+    else:
+        domain = [min_value - padding, max_value + padding]
+
+    x_encoding = {
+        "title": value_title,
+        "axis": alt.Axis(format=".1%" if metric in PCT_COLUMNS else ",.1f"),
+        "scale": alt.Scale(domain=domain),
+    }
+    y_encoding = alt.Y(
+        "_label:N",
+        title=None,
+        sort=EQUITY_DASHBOARD_LABEL_ORDER,
+        axis=alt.Axis(labelLimit=220),
+    )
+    tooltips = [
+        alt.Tooltip("equity_scope:N", title="范围"),
+        alt.Tooltip("_label:N", title="比较项"),
+        alt.Tooltip("_value:Q", title=value_title, format=".2%" if metric in PCT_COLUMNS else ",.2f"),
+    ]
+    for column in [
+        "full_market_value_current",
+        "finance_income_mtd_current",
+        "comprehensive_income_mtd_current",
+        "avg_capital_mtd_current",
+        "finance_return_mtd",
+        "comprehensive_return_mtd",
+    ]:
+        if column == metric or column not in chart_data.columns:
+            continue
+        chart_data[column] = pd.to_numeric(chart_data[column], errors="coerce")
+        tooltips.append(
+            alt.Tooltip(
+                f"{column}:Q",
+                title=display_names_for_mode(comparison_mode).get(column, column),
+                format=".2%" if column in PCT_COLUMNS else ",.2f",
+            )
+        )
+
+    valid_chart_data = chart_data[~chart_data["_value_missing"]].copy()
+    bars = (
+        alt.Chart(valid_chart_data)
+        .mark_bar(cornerRadiusEnd=2)
+        .encode(
+            x=alt.X("_plot_value:Q", **x_encoding),
+            y=y_encoding,
+            color=alt.Color(
+                "_bar_color_group:N",
+                title=None,
+                scale=alt.Scale(
+                    domain=["正向", "负向"],
+                    range=[POSITIVE_COLOR, NEGATIVE_COLOR],
+                ),
+                legend=None,
+            ),
+            tooltip=tooltips,
+        )
+    )
+    zero_rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(
+        color="#475569",
+        opacity=0.55,
+    ).encode(x="x:Q")
+    positive_value_labels = (
+        alt.Chart(valid_chart_data[valid_chart_data["_plot_value"] >= 0])
+        .mark_text(
+            align="left",
+            baseline="middle",
+            dx=7,
+            color="#0D0707",
+            fontSize=12,
+            fontWeight=600,
+        )
+        .encode(
+            x=alt.X("_plot_value:Q", **x_encoding),
+            y=y_encoding,
+            text=alt.Text("_value_label:N"),
+        )
+    )
+    negative_value_labels = (
+        alt.Chart(valid_chart_data[valid_chart_data["_plot_value"] < 0])
+        .mark_text(
+            align="right",
+            baseline="middle",
+            dx=-7,
+            color="#0D0707",
+            fontSize=12,
+            fontWeight=600,
+        )
+        .encode(
+            x=alt.X("_plot_value:Q", **x_encoding),
+            y=y_encoding,
+            text=alt.Text("_value_label:N"),
+        )
+    )
+    missing_value_labels = (
+        alt.Chart(chart_data[chart_data["_value_missing"]])
+        .mark_text(
+            align="left",
+            baseline="middle",
+            dx=7,
+            color="#5C6B7A",
+            fontSize=12,
+            fontWeight=600,
+        )
+        .encode(
+            x=alt.X("_plot_value:Q", **x_encoding),
+            y=y_encoding,
+            text=alt.Text("_value_label:N"),
+            tooltip=[
+                alt.Tooltip("equity_scope:N", title="范围"),
+                alt.Tooltip("_label:N", title="比较项"),
+                alt.Tooltip("_value_label:N", title=value_title),
+            ],
+        )
+    )
+    chart = (
+        (bars + zero_rule + positive_value_labels + negative_value_labels + missing_value_labels)
         .properties(title=title, height=_bar_height(len(chart_data)))
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
@@ -2185,6 +2341,54 @@ def render_outsourced_equity_evidence(
                     *asset_evidence_value_columns(comparison_mode),
                     "source_rows_current",
                     "source_rows_prior",
+                ]
+            ],
+            comparison_mode=comparison_mode,
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+
+
+def render_equity_dashboard(
+    data: pd.DataFrame,
+    current_month: str,
+    comparison_mode: str,
+) -> None:
+    summary = equity_dashboard_summary(data, current_month, comparison_mode)
+    income_title = "年初以来综合收益额" if comparison_mode == "年初以来" else "本月综合收益额"
+
+    chart_cols = st.columns(2)
+    with chart_cols[0]:
+        render_equity_dashboard_bar_chart(
+            summary,
+            "comprehensive_income_mtd_current",
+            f"股票专项：{income_title}",
+            display_names_for_mode(comparison_mode)["comprehensive_income_mtd_current"],
+            comparison_mode,
+        )
+    with chart_cols[1]:
+        render_equity_dashboard_bar_chart(
+            summary,
+            "comprehensive_return_mtd",
+            "股票专项：综合收益率",
+            display_names_for_mode(comparison_mode)["comprehensive_return_mtd"],
+            comparison_mode,
+        )
+
+    st.dataframe(
+        format_table(
+            summary[
+                [
+                    "equity_scope",
+                    "equity_group_display_label",
+                    "full_market_value_current",
+                    "finance_income_mtd_current",
+                    "comprehensive_income_mtd_current",
+                    "avg_capital_mtd_current",
+                    "finance_return_mtd",
+                    "comprehensive_return_mtd",
+                    "record_count_current",
                 ]
             ],
             comparison_mode=comparison_mode,
@@ -3125,6 +3329,18 @@ def main() -> None:
         hide_index=True,
     )
     render_asset_return_completion(data, current_month)
+
+    st.divider()
+
+    section_anchor("equity-dashboard")
+    st.subheader("股票专项看板：委内/委外权益收益对比")
+    show_block_note(
+        "本模块只跟随数据时点和分析视角，不受账户、投资品种或投资经理筛选影响；"
+        "委内固定展示股票、四类权益产品合计和鲍淼配置盘 OCI 股票，长股投股票不纳入；"
+        "委外按公司汇总全部权益资产并排除现金、固收、应收和费用项目；"
+        "无持仓公司保留零值，平均资金占用不足时收益率显示为 —。"
+    )
+    render_equity_dashboard(data, current_month, comparison_mode)
 
     st.divider()
 
