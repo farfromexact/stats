@@ -7,7 +7,7 @@ import pandas as pd
 INTERNAL_MANDATE = "委托资管"
 RETURN_BASE_THRESHOLD = 0.0001
 EXCLUDED_STRATEGY_BOOK = "流动性/其他未纳入五类"
-STRATEGY_CLASSIFICATION_VERSION = "2026-07-24-v3"
+STRATEGY_CLASSIFICATION_VERSION = "2026-08-02-v4"
 
 INTERNAL_STRATEGY_BOOK_ORDER = [
     "固收-配置盘",
@@ -121,6 +121,22 @@ OUTSOURCED_FIXED_BOOKS = {
     "中信建投固收",
     "中邮证券固收",
 }
+OUTSOURCED_TRUSTEE_DISPLAY = {
+    "人保固收": "人保",
+    "泰康固收": "泰康",
+    "中信建投固收": "中信建投",
+    "中邮证券固收": "中邮证券",
+    "富国权益": "富国基金",
+    "华泰权益": "华泰",
+    "华夏基金权益": "华夏基金",
+    "国泰海通权益": "国泰海通",
+    "大成基金权益": "大成基金",
+    "广发基金权益": "广发基金",
+    "太平资产香港": "太平资产香港",
+    "太保投资香港": "太保投资香港",
+    "国寿富兰克林": "国寿富兰克林",
+}
+MANAGER_DISPLAY_COLUMN = "manager_display"
 OUTSOURCED_EQUITY_BOOKS = {
     "富国权益",
     "华泰权益",
@@ -220,6 +236,7 @@ STRATEGY_BOOK_OUTPUT_COLUMNS = [
     "strategy_book_section",
     "strategy_book_item",
     "strategy_book_exclusion_reason",
+    MANAGER_DISPLAY_COLUMN,
 ]
 
 
@@ -277,6 +294,15 @@ def strategy_book_display_label(value: object) -> str:
     if scope in {"委内", "委外"}:
         return f"{scope}-{label}"
     return label
+
+
+def manager_display_label(manager: object, strategy_book: object) -> str:
+    """Use the recognized outsourced institution when the source manager is blank."""
+    raw_manager = "" if pd.isna(manager) else str(manager).strip()
+    trustee = OUTSOURCED_TRUSTEE_DISPLAY.get(str(strategy_book).strip())
+    if trustee and raw_manager in {"", "未分配/待确认"}:
+        return trustee
+    return raw_manager or "未分配/待确认"
 
 
 def strategy_book_section(row: pd.Series | dict) -> str:
@@ -437,6 +463,7 @@ def assign_strategy_book_columns(data: pd.DataFrame) -> pd.DataFrame:
         working["strategy_book_section"] = pd.Series(dtype=object)
         working["strategy_book_item"] = pd.Series(dtype=object)
         working["strategy_book_exclusion_reason"] = pd.Series(dtype=object)
+        working[MANAGER_DISPLAY_COLUMN] = pd.Series(dtype=object)
         return working
 
     working["strategy_book"] = working.apply(classify_strategy_book, axis=1)
@@ -449,6 +476,10 @@ def assign_strategy_book_columns(data: pd.DataFrame) -> pd.DataFrame:
     hierarchy_excluded = hierarchy_exclusion_reason.ne("")
     working.loc[hierarchy_excluded, "strategy_book_exclusion_reason"] = hierarchy_exclusion_reason.loc[
         hierarchy_excluded
+    ]
+    working[MANAGER_DISPLAY_COLUMN] = [
+        manager_display_label(manager, strategy_book)
+        for manager, strategy_book in zip(working["manager"], working["strategy_book"])
     ]
     return working
 

@@ -22,6 +22,10 @@ def _snapshot_slice(data: pd.DataFrame, snapshot: str) -> pd.DataFrame:
     return data[data[_snapshot_key_column(data)] == snapshot]
 
 
+def _manager_column(data: pd.DataFrame) -> str:
+    return "manager_display" if "manager_display" in data.columns else "manager"
+
+
 def _aggregate(data: pd.DataFrame, month: str, group_cols: list[str]) -> pd.DataFrame:
     subset = _snapshot_slice(data, month).copy()
     for metric in GROUP_METRICS:
@@ -145,17 +149,29 @@ def filter_current(
     manager: str | None = None,
 ) -> pd.DataFrame:
     subset = _snapshot_slice(data, current_month).copy()
+    manager_column = _manager_column(subset)
     if account and account != "全部":
         subset = subset[subset["account_bucket"] == account]
     if asset_class and asset_class != "全部":
         subset = subset[subset["asset_class"] == asset_class]
     if manager and manager != "全部":
-        subset = subset[subset["manager"] == manager]
+        subset = subset[subset[manager_column] == manager]
     return subset
 
 
-def _asset_evidence_group_columns(extra_group_cols: list[str] | None = None) -> list[str]:
-    base_cols = ["asset_key", "asset_name", "asset_code", "trade_code", "account_bucket", "asset_class", "manager"]
+def _asset_evidence_group_columns(
+    extra_group_cols: list[str] | None = None,
+    manager_column: str = "manager",
+) -> list[str]:
+    base_cols = [
+        "asset_key",
+        "asset_name",
+        "asset_code",
+        "trade_code",
+        "account_bucket",
+        "asset_class",
+        manager_column,
+    ]
     cols: list[str] = []
     for column in (extra_group_cols or []) + base_cols:
         if column not in cols:
@@ -208,14 +224,15 @@ def asset_evidence(
     extra_group_cols: list[str] | None = None,
 ) -> pd.DataFrame:
     subset = data.copy()
+    manager_column = _manager_column(subset)
     if account and account != "全部":
         subset = subset[subset["account_bucket"] == account]
     if asset_class and asset_class != "全部":
         subset = subset[subset["asset_class"] == asset_class]
     if manager and manager != "全部":
-        subset = subset[subset["manager"] == manager]
+        subset = subset[subset[manager_column] == manager]
 
-    cols = _asset_evidence_group_columns(extra_group_cols)
+    cols = _asset_evidence_group_columns(extra_group_cols, manager_column)
     subset = _ensure_group_columns(subset, cols)
     subset = _ensure_numeric_columns(
         subset,
@@ -295,14 +312,15 @@ def asset_evidence_year_open(
     prior_month: str | None = None,
 ) -> pd.DataFrame:
     subset = data.copy()
+    manager_column = _manager_column(subset)
     if account and account != "全部":
         subset = subset[subset["account_bucket"] == account]
     if asset_class and asset_class != "全部":
         subset = subset[subset["asset_class"] == asset_class]
     if manager and manager != "全部":
-        subset = subset[subset["manager"] == manager]
+        subset = subset[subset[manager_column] == manager]
 
-    cols = _asset_evidence_group_columns(extra_group_cols)
+    cols = _asset_evidence_group_columns(extra_group_cols, manager_column)
     subset = _ensure_group_columns(subset, cols)
     subset = _ensure_numeric_columns(
         subset,

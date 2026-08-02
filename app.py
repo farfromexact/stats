@@ -37,6 +37,7 @@ STRATEGY_CLASSIFICATION_VERSION = strategy_books_module.STRATEGY_CLASSIFICATION_
 EQUITY_DASHBOARD_LABEL_ORDER = strategy_books_module.EQUITY_DASHBOARD_LABEL_ORDER
 EXTERNAL_STRATEGY_BOOK_ORDER = strategy_books_module.EXTERNAL_STRATEGY_BOOK_ORDER
 OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER = strategy_books_module.OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER
+MANAGER_DISPLAY_COLUMN = strategy_books_module.MANAGER_DISPLAY_COLUMN
 STRATEGY_BOOK_LABEL_ORDER = strategy_books_module.STRATEGY_BOOK_LABEL_ORDER
 equity_dashboard_summary = strategy_books_module.equity_dashboard_summary
 excluded_strategy_book_detail = strategy_books_module.excluded_strategy_book_detail
@@ -684,6 +685,7 @@ DISPLAY_NAMES = {
     "asset_class": "投资品种",
     "trade_strategy": "交易策略",
     "manager": "投资经理",
+    "manager_display": "投资经理/受托机构",
     "asset_name": "资产名称",
     "asset_code": "资产代码",
     "trade_code": "交易代码",
@@ -986,7 +988,7 @@ def render_filter_pills(
         [
             ("账户", selected_label(selected_account)),
             ("投资品种", selected_label(selected_asset_class)),
-            ("投资经理", selected_label(selected_manager)),
+            ("投资经理/受托机构", selected_label(selected_manager)),
         ]
     )
     pills = "".join(
@@ -2337,7 +2339,7 @@ def render_outsourced_equity_evidence(
                     "trade_code",
                     "account_bucket",
                     "asset_class",
-                    "manager",
+                    MANAGER_DISPLAY_COLUMN,
                     *asset_evidence_value_columns(comparison_mode),
                     "source_rows_current",
                     "source_rows_prior",
@@ -3182,7 +3184,9 @@ def main() -> None:
     manager_options_frame = account_filtered_options
     if selected_asset_class != ALL:
         manager_options_frame = manager_options_frame[manager_options_frame["asset_class"] == selected_asset_class]
-    manager_options = [ALL] + sorted(manager_options_frame["manager"].dropna().astype(str).unique().tolist())
+    manager_options = [ALL] + sorted(
+        manager_options_frame[MANAGER_DISPLAY_COLUMN].dropna().astype(str).unique().tolist()
+    )
     if st.session_state.get("投资经理") not in manager_options:
         st.session_state["投资经理"] = ALL
     selected_manager = st.session_state.get("投资经理", ALL)
@@ -3335,7 +3339,7 @@ def main() -> None:
     section_anchor("equity-dashboard")
     st.subheader("股票专项看板：委内/委外权益收益对比")
     show_block_note(
-        "本模块只跟随数据时点和分析视角，不受账户、投资品种或投资经理筛选影响；"
+        "本模块只跟随数据时点和分析视角，不受账户、投资品种或投资经理/受托机构筛选影响；"
         "委内固定展示股票、四类权益产品合计和鲍淼配置盘 OCI 股票，长股投股票不纳入；"
         "委外按公司汇总全部权益资产并排除现金、固收、应收和费用项目；"
         "无持仓公司保留零值，平均资金占用不足时收益率显示为 —。"
@@ -3536,9 +3540,9 @@ def main() -> None:
     )
 
     section_anchor("manager-breakdown")
-    st.subheader("品种内经理拆解")
+    st.subheader("品种内投资经理/受托机构拆解")
     show_block_note(
-        f"本表用于回答选定品种下，结果由哪些投资经理贡献或拖累；投资经理筛选会同步收窄本表和资产证据，当前采用{comparison_mode}口径。"
+        f"本表用于回答选定品种下，结果由哪些投资经理贡献或拖累；委外记录的源表投资经理为空时，改用已识别的受托机构标注。筛选会同步收窄本表和资产证据，当前采用{comparison_mode}口径。"
     )
     if st.session_state.get("经理展示口径") not in ["合并账户", "拆分账户"]:
         st.session_state["经理展示口径"] = "合并账户"
@@ -3561,7 +3565,9 @@ def main() -> None:
     manager_options_frame = account_filtered_options
     if selected_asset_class != ALL:
         manager_options_frame = manager_options_frame[manager_options_frame["asset_class"] == selected_asset_class]
-    manager_options = [ALL] + sorted(manager_options_frame["manager"].dropna().astype(str).unique().tolist())
+    manager_options = [ALL] + sorted(
+        manager_options_frame[MANAGER_DISPLAY_COLUMN].dropna().astype(str).unique().tolist()
+    )
     if st.session_state.get("投资经理") not in manager_options:
         st.session_state["投资经理"] = ALL
     with manager_scope_cols[1]:
@@ -3569,15 +3575,17 @@ def main() -> None:
     manager_options_frame = account_filtered_options
     if selected_asset_class != ALL:
         manager_options_frame = manager_options_frame[manager_options_frame["asset_class"] == selected_asset_class]
-    manager_options = [ALL] + sorted(manager_options_frame["manager"].dropna().astype(str).unique().tolist())
+    manager_options = [ALL] + sorted(
+        manager_options_frame[MANAGER_DISPLAY_COLUMN].dropna().astype(str).unique().tolist()
+    )
     if st.session_state.get("投资经理") not in manager_options:
         st.session_state["投资经理"] = ALL
     with manager_scope_cols[2]:
-        selected_manager = st.selectbox("投资经理", manager_options, key="投资经理")
+        selected_manager = st.selectbox("投资经理/受托机构", manager_options, key="投资经理")
     manager_group_cols = (
-        ["asset_class", "manager"]
+        ["asset_class", MANAGER_DISPLAY_COLUMN]
         if manager_view_mode == "合并账户"
-        else ["account_bucket", "asset_class", "manager"]
+        else ["account_bucket", "asset_class", MANAGER_DISPLAY_COLUMN]
     )
     manager_summary = ensure_summary_columns(
         comparison_summary(
@@ -3594,11 +3602,11 @@ def main() -> None:
     if selected_asset_class != ALL:
         manager_summary = manager_summary[manager_summary["asset_class"] == selected_asset_class]
     if selected_manager != ALL:
-        manager_summary = manager_summary[manager_summary["manager"] == selected_manager]
+        manager_summary = manager_summary[manager_summary[MANAGER_DISPLAY_COLUMN] == selected_manager]
     manager_display = manager_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
     manager_display_columns = [
         "asset_class",
-        "manager",
+        MANAGER_DISPLAY_COLUMN,
         "full_market_value_current",
         "full_market_value_prior",
         "full_market_value_delta",
@@ -3686,7 +3694,7 @@ def main() -> None:
                 [
                     "change_type",
                     "asset_name",
-                    "manager",
+                    MANAGER_DISPLAY_COLUMN,
                     *asset_evidence_value_columns(comparison_mode),
                     "asset_code",
                     "trade_code",

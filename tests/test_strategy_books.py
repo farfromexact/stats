@@ -7,6 +7,7 @@ from portfolio_data import load_snapshots
 from strategy_books import (
     EQUITY_DASHBOARD_LABEL_ORDER,
     EXCLUDED_STRATEGY_BOOK,
+    MANAGER_DISPLAY_COLUMN,
     assign_strategy_book_columns,
     classify_strategy_book,
     ensure_strategy_book_columns,
@@ -35,6 +36,40 @@ def row(**overrides):
 
 
 class StrategyBookClassificationTest(unittest.TestCase):
+    def test_outsourced_rows_use_trustee_display_when_manager_is_unassigned(self):
+        source = pd.DataFrame(
+            [
+                row(
+                    mandate_type="单一委外",
+                    fund_book_name="大成基金中邮1号单一资产管理计划",
+                    asset_major_class="权益",
+                    asset_class="股票",
+                    manager="未分配/待确认",
+                ),
+                row(
+                    mandate_type="委托太保投资香港",
+                    fund_book_name="传统保险产品QDII（太保委托专户）",
+                    asset_major_class="权益",
+                    asset_class="股票",
+                    manager="未分配/待确认",
+                ),
+                row(
+                    mandate_type="委托资管",
+                    asset_major_class="权益",
+                    trade_strategy="交易",
+                    asset_class="股票",
+                    manager="鲍淼",
+                ),
+            ]
+        )
+
+        result = assign_strategy_book_columns(source)
+
+        self.assertEqual(result.loc[0, "strategy_book"], "大成基金权益")
+        self.assertEqual(result.loc[0, MANAGER_DISPLAY_COLUMN], "大成基金")
+        self.assertEqual(result.loc[1, MANAGER_DISPLAY_COLUMN], "太保投资香港")
+        self.assertEqual(result.loc[2, MANAGER_DISPLAY_COLUMN], "鲍淼")
+
     def test_ensure_strategy_book_columns_reuses_complete_classification_without_aliasing(self):
         source = pd.DataFrame(
             [

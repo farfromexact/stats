@@ -6,6 +6,44 @@ from account_review import asset_evidence, asset_evidence_year_open, comparison_
 
 
 class AssetEvidenceTest(unittest.TestCase):
+    def test_asset_evidence_filters_by_manager_display_when_available(self):
+        data = pd.DataFrame(
+            [
+                {
+                    "snapshot_month": "2026-06",
+                    "asset_key": "asset-a",
+                    "asset_name": "大成股票",
+                    "account_bucket": "穿透账户",
+                    "asset_class": "股票",
+                    "manager": "未分配/待确认",
+                    "manager_display": "大成基金",
+                    "full_market_value": 1.0,
+                    "avg_capital_mtd": 1.0,
+                    "finance_income_mtd": 0.01,
+                    "comprehensive_income_mtd": 0.02,
+                },
+                {
+                    "snapshot_month": "2026-06",
+                    "asset_key": "asset-b",
+                    "asset_name": "华夏股票",
+                    "account_bucket": "穿透账户",
+                    "asset_class": "股票",
+                    "manager": "未分配/待确认",
+                    "manager_display": "华夏基金",
+                    "full_market_value": 2.0,
+                    "avg_capital_mtd": 2.0,
+                    "finance_income_mtd": 0.02,
+                    "comprehensive_income_mtd": 0.04,
+                },
+            ]
+        )
+
+        evidence = asset_evidence(data, "2026-06", "2026-06", manager="大成基金")
+
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence.loc[0, "manager_display"], "大成基金")
+        self.assertAlmostEqual(evidence.loc[0, "full_market_value_current"], 1.0)
+
     def test_same_month_snapshots_are_filtered_by_exact_date(self):
         data = pd.DataFrame(
             [
