@@ -568,6 +568,31 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
             },
         )
 
+    def test_20260730_control_totals(self):
+        self.assert_control_totals(
+            "2026-07-30",
+            {
+                "固收-配置盘": 5198.315209,
+                "固收-交易盘": 990.653703,
+                "非标": 235.210710,
+                "权益-配置盘": 426.590698,
+                "权益-交易盘": 353.627487,
+                "人保固收": 129.182287,
+                "泰康固收": 44.407563,
+                "中信建投固收": 7.513819,
+                "中邮证券固收": 7.454358,
+                "富国权益": 4.763796,
+                "华泰权益": 4.905433,
+                "华夏基金权益": 4.633333,
+                "国泰海通权益": 4.330255,
+                "大成基金权益": 3.021332,
+                "广发基金权益": 2.632091,
+                "太平资产香港": 4.374968,
+                "太保投资香港": 6.736225,
+                "国寿富兰克林": 8.340885,
+            },
+        )
+
     def test_20260723_equity_dashboard_controls(self):
         data, _, errors = load_snapshots(DATA_DIR)
         self.assertEqual(errors, [])
@@ -600,6 +625,52 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
             "委外-广发基金": -0.1428590069,
             "委外-太平资产香港": -0.6019822658,
             "委外-太保投资香港": -0.8854345953,
+            "委外-国寿富兰克林": 0.0,
+        }
+
+        self.assertEqual(summary.index.tolist(), EQUITY_DASHBOARD_LABEL_ORDER)
+        for label, expected in expected_market_values.items():
+            self.assertAlmostEqual(summary.loc[label, "full_market_value_current"], expected, places=6)
+        for label, expected in expected_comprehensive_income.items():
+            self.assertAlmostEqual(
+                summary.loc[label, "comprehensive_income_mtd_current"],
+                expected,
+                places=6,
+            )
+        self.assertTrue(pd.isna(summary.loc["委外-国寿富兰克林", "comprehensive_return_mtd"]))
+
+    def test_20260730_equity_dashboard_controls(self):
+        data, _, errors = load_snapshots(DATA_DIR)
+        self.assertEqual(errors, [])
+        summary = equity_dashboard_summary(data, "2026-07-30", "年初以来").set_index(
+            "equity_group_display_label"
+        )
+        expected_market_values = {
+            "委内-股票": 135.7896219540,
+            "委内-权益产品": 217.8380718143,
+            "委内-OCI股票": 426.5906975901,
+            "委外-富国": 4.2835977733,
+            "委外-华泰": 4.7770776529,
+            "委外-华夏基金": 3.7526065566,
+            "委外-国泰海通": 3.5697605536,
+            "委外-大成基金": 1.8822039763,
+            "委外-广发基金": 2.1708634583,
+            "委外-太平资产香港": 1.8483986367,
+            "委外-太保投资香港": 3.0770500626,
+            "委外-国寿富兰克林": 0.0,
+        }
+        expected_comprehensive_income = {
+            "委内-股票": -16.5701156707,
+            "委内-权益产品": -4.8217749059,
+            "委内-OCI股票": 32.8830524276,
+            "委外-富国": -0.2362126600,
+            "委外-华泰": -0.0951577706,
+            "委外-华夏基金": -0.3664560100,
+            "委外-国泰海通": -0.6693886998,
+            "委外-大成基金": 0.0215344894,
+            "委外-广发基金": -0.3676981457,
+            "委外-太平资产香港": -0.5033732776,
+            "委外-太保投资香港": -0.8476368905,
             "委外-国寿富兰克林": 0.0,
         }
 
