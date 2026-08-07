@@ -628,6 +628,56 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
             },
         )
 
+    def test_20260731_control_totals(self):
+        self.assert_control_totals(
+            "2026-07-31",
+            {
+                "固收-配置盘": 5204.812892,
+                "固收-交易盘": 991.215380,
+                "非标": 235.229275,
+                "权益-配置盘": 420.577577,
+                "权益-交易盘": 359.825116,
+                "人保固收": 128.720815,
+                "泰康固收": 44.425402,
+                "中信建投固收": 7.515424,
+                "中邮证券固收": 7.452429,
+                "富国权益": 4.697120,
+                "华泰权益": 4.937460,
+                "华夏基金权益": 4.721918,
+                "国泰海通权益": 4.412165,
+                "大成基金权益": 3.024118,
+                "广发基金权益": 2.681748,
+                "太平资产香港": 4.403869,
+                "太保投资香港": 6.811128,
+                "国寿富兰克林": 8.339163,
+            },
+        )
+
+    def test_20260806_control_totals(self):
+        self.assert_control_totals(
+            "2026-08-06",
+            {
+                "固收-配置盘": 5216.346281,
+                "固收-交易盘": 990.419610,
+                "非标": 235.336167,
+                "权益-配置盘": 408.606020,
+                "权益-交易盘": 386.673799,
+                "人保固收": 128.850382,
+                "泰康固收": 44.141438,
+                "中信建投固收": 7.519233,
+                "中邮证券固收": 7.479676,
+                "富国权益": 4.896889,
+                "华泰权益": 5.180671,
+                "华夏基金权益": 4.978069,
+                "国泰海通权益": 4.632137,
+                "大成基金权益": 3.037196,
+                "广发基金权益": 2.849701,
+                "太平资产香港": 4.323285,
+                "太保投资香港": 6.896342,
+                "国寿富兰克林": 8.345743,
+            },
+        )
+
     def test_20260723_equity_dashboard_controls(self):
         data, _, errors = load_snapshots(DATA_DIR)
         self.assertEqual(errors, [])
@@ -706,6 +756,98 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
             "委外-广发基金": -0.3676981457,
             "委外-太平资产香港": -0.5033732776,
             "委外-太保投资香港": -0.8476368905,
+            "委外-国寿富兰克林": 0.0,
+        }
+
+        self.assertEqual(summary.index.tolist(), EQUITY_DASHBOARD_LABEL_ORDER)
+        for label, expected in expected_market_values.items():
+            self.assertAlmostEqual(summary.loc[label, "full_market_value_current"], expected, places=6)
+        for label, expected in expected_comprehensive_income.items():
+            self.assertAlmostEqual(
+                summary.loc[label, "comprehensive_income_mtd_current"],
+                expected,
+                places=6,
+            )
+        self.assertTrue(pd.isna(summary.loc["委外-国寿富兰克林", "comprehensive_return_mtd"]))
+
+    def test_20260731_equity_dashboard_controls(self):
+        data, _, errors = load_snapshots(DATA_DIR)
+        self.assertEqual(errors, [])
+        summary = equity_dashboard_summary(data, "2026-07-31", "年初以来").set_index(
+            "equity_group_display_label"
+        )
+        expected_market_values = {
+            "委内-股票": 143.9111290602,
+            "委内-权益产品": 215.9141976741,
+            "委内-OCI股票": 420.5775773938,
+            "委外-富国": 4.2957343350,
+            "委外-华泰": 4.8147533415,
+            "委外-华夏基金": 4.1252175447,
+            "委外-国泰海通": 3.7268620207,
+            "委外-大成基金": 1.9118378810,
+            "委外-广发基金": 2.2193222292,
+            "委外-太平资产香港": 1.8778843480,
+            "委外-太保投资香港": 3.1527264751,
+            "委外-国寿富兰克林": 0.0,
+        }
+        expected_comprehensive_income = {
+            "委内-股票": -14.3783470151,
+            "委内-权益产品": -4.8702332645,
+            "委内-OCI股票": 26.8268153677,
+            "委外-富国": -0.3028851687,
+            "委外-华泰": -0.0631255527,
+            "委外-华夏基金": -0.2778602178,
+            "委外-国泰海通": -0.5874664770,
+            "委外-大成基金": 0.0243226750,
+            "委外-广发基金": -0.3180336617,
+            "委外-太平资产香港": -0.4738875663,
+            "委外-太保投资香港": -0.7719604780,
+            "委外-国寿富兰克林": 0.0,
+        }
+
+        self.assertEqual(summary.index.tolist(), EQUITY_DASHBOARD_LABEL_ORDER)
+        for label, expected in expected_market_values.items():
+            self.assertAlmostEqual(summary.loc[label, "full_market_value_current"], expected, places=6)
+        for label, expected in expected_comprehensive_income.items():
+            self.assertAlmostEqual(
+                summary.loc[label, "comprehensive_income_mtd_current"],
+                expected,
+                places=6,
+            )
+        self.assertTrue(pd.isna(summary.loc["委外-国寿富兰克林", "comprehensive_return_mtd"]))
+
+    def test_20260806_equity_dashboard_controls(self):
+        data, _, errors = load_snapshots(DATA_DIR)
+        self.assertEqual(errors, [])
+        summary = equity_dashboard_summary(data, "2026-08-06", "年初以来").set_index(
+            "equity_group_display_label"
+        )
+        expected_market_values = {
+            "委内-股票": 152.5502987876,
+            "委内-权益产品": 234.1237234359,
+            "委内-OCI股票": 408.6060200822,
+            "委外-富国": 4.6423490441,
+            "委外-华泰": 5.0588428061,
+            "委外-华夏基金": 4.3944873513,
+            "委外-国泰海通": 3.8632508814,
+            "委外-大成基金": 1.9249609726,
+            "委外-广发基金": 2.1746052664,
+            "委外-太平资产香港": 1.7953494031,
+            "委外-太保投资香港": 3.1997688753,
+            "委外-国寿富兰克林": 0.0,
+        }
+        expected_comprehensive_income = {
+            "委内-股票": -10.0554480152,
+            "委内-权益产品": 6.8259210924,
+            "委内-OCI股票": 12.6710948123,
+            "委外-富国": -0.1030152043,
+            "委外-华泰": 0.1801418955,
+            "委外-华夏基金": -0.0216392267,
+            "委外-国泰海通": -0.3674201775,
+            "委外-大成基金": 0.0374457666,
+            "委外-广发基金": -0.1500358848,
+            "委外-太平资产香港": -0.5564225112,
+            "委外-太保投资香港": -0.6914949635,
             "委外-国寿富兰克林": 0.0,
         }
 

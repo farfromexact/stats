@@ -2,7 +2,12 @@ import unittest
 
 import pandas as pd
 
-from app import _annualization_factor, previous_official_snapshots
+from app import (
+    _annualization_factor,
+    default_comparison_snapshot,
+    previous_official_snapshots,
+    selectable_comparison_snapshots,
+)
 
 
 class SnapshotSelectionTest(unittest.TestCase):
@@ -38,6 +43,16 @@ class SnapshotSelectionTest(unittest.TestCase):
     def test_interim_annualization_uses_elapsed_days(self):
         self.assertAlmostEqual(_annualization_factor("2026-07-16"), 365 / 197)
         self.assertAlmostEqual(_annualization_factor("2024-02-29"), 366 / 60)
+
+    def test_custom_comparison_excludes_current_and_defaults_to_latest_prior_snapshot(self):
+        snapshots = ["2026-06-30", "2026-07-16", "2026-07-31", "2026-08-06"]
+
+        self.assertEqual(
+            selectable_comparison_snapshots(snapshots, "2026-07-31"),
+            ["2026-06-30", "2026-07-16", "2026-08-06"],
+        )
+        self.assertEqual(default_comparison_snapshot(snapshots, "2026-07-31"), "2026-07-16")
+        self.assertEqual(default_comparison_snapshot(snapshots, "2026-06-30"), "2026-07-16")
 
 
 if __name__ == "__main__":

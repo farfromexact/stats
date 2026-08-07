@@ -48,7 +48,11 @@ strategy_book_summary = strategy_books_module.strategy_book_summary
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
-DATA_SCHEMA_VERSION = "2026-07-22-parquet-only-v3"
+DATA_SCHEMA_VERSION = "2026-07-31-parquet-only-v5"
+YEAR_TO_DATE_MODE = "年初以来"
+MONTH_REVIEW_MODE = "单月复盘"
+SNAPSHOT_COMPARISON_MODE = "时点对比"
+COMPARISON_MODE_OPTIONS = [YEAR_TO_DATE_MODE, MONTH_REVIEW_MODE, SNAPSHOT_COMPARISON_MODE]
 ASSET_RETURN_PLAN_PATH = DATA_DIR.parent / "asset_return_plan_2026.csv"
 MAINTENANCE_MESSAGE = "多事之秋，我们秋天再见"
 MAINTENANCE_SUBMESSAGE = "如有需要微信找我"
@@ -755,6 +759,14 @@ YTD_DISPLAY_OVERRIDES = {
     "source_rows_prior": "年初源行数",
 }
 
+SNAPSHOT_COMPARISON_DISPLAY_OVERRIDES = {
+    "full_market_value_prior": "对比时点市值(亿)",
+    "full_market_value_delta": "较对比时点变化(亿)",
+    "net_full_market_value_delta": "扣收益后较对比时点规模变化(亿)",
+    "monthly_position_flow_delta": "扣本月综合收益后较对比时点加减仓(亿)",
+    "source_rows_prior": "对比时点源行数",
+}
+
 AMOUNT_COLUMNS = {
     "full_market_value",
     "finance_income_mtd",
@@ -856,6 +868,19 @@ def previous_official_snapshots(data: pd.DataFrame, current_snapshot: str) -> li
     return sorted(candidates["snapshot_date"].astype(str).tolist())
 
 
+def selectable_comparison_snapshots(snapshots: list[str], current_snapshot: str) -> list[str]:
+    """Return valid baseline choices while preventing a snapshot from comparing with itself."""
+    return [snapshot for snapshot in snapshots if snapshot != current_snapshot]
+
+
+def default_comparison_snapshot(snapshots: list[str], current_snapshot: str) -> str:
+    options = selectable_comparison_snapshots(snapshots, current_snapshot)
+    if not options:
+        return ""
+    earlier = [snapshot for snapshot in options if snapshot < current_snapshot]
+    return earlier[-1] if earlier else options[0]
+
+
 @st.cache_data(show_spinner="正在读取并预处理月度宽表...")
 def cached_load(
     data_dir: str,
@@ -915,8 +940,10 @@ def ensure_summary_columns(summary: pd.DataFrame, comparison_mode: str) -> pd.Da
 
 def display_names_for_mode(comparison_mode: str) -> dict[str, str]:
     names = DISPLAY_NAMES.copy()
-    if comparison_mode == "年初以来":
+    if comparison_mode == YEAR_TO_DATE_MODE:
         names.update(YTD_DISPLAY_OVERRIDES)
+    elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        names.update(SNAPSHOT_COMPARISON_DISPLAY_OVERRIDES)
     return names
 
 
@@ -977,8 +1004,10 @@ def render_filter_pills(
     selected_manager: str,
 ) -> None:
     current_label = snapshot_display_label(current_month)
-    if comparison_mode == "年初以来":
+    if comparison_mode == YEAR_TO_DATE_MODE:
         view_text = f"年初以来，截至 {current_label}"
+    elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        view_text = f"{current_label} 对比 {snapshot_display_label(prior_month)}"
     else:
         view_text = f"{current_label} 单月复盘，规模较 {snapshot_display_label(prior_month)}"
     items = [
@@ -1047,8 +1076,15 @@ def render_decision_summary(
     asset_class_summary: pd.DataFrame,
     quality: dict[str, int],
 ) -> None:
-    baseline = "年初" if comparison_mode == "年初以来" else snapshot_display_label(prior_month)
-    period = "年初以来截至时点" if comparison_mode == "年初以来" else "本月截至时点"
+    if comparison_mode == YEAR_TO_DATE_MODE:
+        baseline = "年初"
+        period = "年初以来截至时点"
+    elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        baseline = f"对比时点 {snapshot_display_label(prior_month)}"
+        period = "当前时点本月截至"
+    else:
+        baseline = snapshot_display_label(prior_month)
+        period = "本月截至时点"
     mv_delta = current_mv - prior_mv
     mv_direction = "增加" if mv_delta >= 0 else "减少"
     top_gain = metric_extreme(asset_class_summary, "asset_class", "comprehensive_income_mtd_current", False)
@@ -1205,7 +1241,7 @@ def reset_boolean_state_on_context(state_key: str, context: tuple[object, ...]) 
 
 def income_chart_config(comparison_mode: str, title_prefix: str, title_suffix: str) -> tuple[str, str, str]:
     metric = "comprehensive_income_mtd_current"
-    period = "年初以来" if comparison_mode == "年初以来" else "本月"
+    period = "年初以来" if comparison_mode == YEAR_TO_DATE_MODE else "本月"
     return (
         metric,
         f"{title_prefix}{period}综合收益{title_suffix}",
@@ -1257,11 +1293,16 @@ def quality_metrics(data: pd.DataFrame, current_month: str, comparison_mode: str
 
 
 def income_diff_breakdown(current_slice: pd.DataFrame, comparison_mode: str) -> pd.DataFrame:
-    if comparison_mode == "年初以来":
+    if comparison_mode == YEAR_TO_DATE_MODE:
         finance_col = "finance_income_ytd"
         comprehensive_col = "comprehensive_income_ytd"
         label = "年初以来"
         source_period = "本年以来"
+    elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        finance_col = "finance_income_mtd"
+        comprehensive_col = "comprehensive_income_mtd"
+        label = "当前时点本月"
+        source_period = "本月以来"
     else:
         finance_col = "finance_income_mtd"
         comprehensive_col = "comprehensive_income_mtd"
@@ -1288,8 +1329,15 @@ def auto_summary(
 ) -> str:
     delta = current_mv - prior_mv
     direction = "增加" if delta >= 0 else "减少"
-    baseline = "年初" if comparison_mode == "年初以来" else "上月"
-    period = "年初以来" if comparison_mode == "年初以来" else "本月"
+    if comparison_mode == YEAR_TO_DATE_MODE:
+        baseline = "年初"
+        period = "年初以来"
+    elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        baseline = "对比时点"
+        period = "当前时点本月"
+    else:
+        baseline = "上月"
+        period = "本月"
     risk_items = [f"{name}{count}条" for name, count in quality.items() if count > 0]
     risk_text = "；".join(risk_items) if risk_items else "未发现主要数据质量提示"
     return (
@@ -2358,7 +2406,12 @@ def render_equity_dashboard(
     comparison_mode: str,
 ) -> None:
     summary = equity_dashboard_summary(data, current_month, comparison_mode)
-    income_title = "年初以来综合收益额" if comparison_mode == "年初以来" else "本月综合收益额"
+    if comparison_mode == YEAR_TO_DATE_MODE:
+        income_title = "年初以来综合收益额"
+    elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        income_title = "当前时点本月综合收益额"
+    else:
+        income_title = "本月综合收益额"
 
     chart_cols = st.columns(2)
     with chart_cols[0]:
@@ -3139,15 +3192,33 @@ def main() -> None:
             index=snapshots.index(default_current),
             format_func=lambda value: snapshot_display_label(value, status_by_snapshot.get(value)),
         )
-        comparison_mode = st.selectbox("分析视角", ["年初以来", "单月复盘"], index=0)
+        comparison_mode = st.selectbox("分析视角", COMPARISON_MODE_OPTIONS, index=0, key="分析视角")
         prior_candidates = previous_official_snapshots(data, current_month)
-        if comparison_mode == "单月复盘" and not prior_candidates:
+        if comparison_mode == MONTH_REVIEW_MODE and not prior_candidates:
             st.error("缺少上一自然月的月末正式快照，不能做单月复盘规模变化。")
             st.stop()
-        if comparison_mode == "单月复盘":
+        if comparison_mode == MONTH_REVIEW_MODE:
             prior_month = prior_candidates[-1]
             st.caption(
                 f"单月复盘使用上一自然月正式快照 {snapshot_display_label(prior_month)} 作为规模变化基准。"
+            )
+        elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
+            comparison_options = selectable_comparison_snapshots(snapshots, current_month)
+            if not comparison_options:
+                st.error("至少需要两个不同的数据时点才能进行时点对比。")
+                st.stop()
+            comparison_default = default_comparison_snapshot(snapshots, current_month)
+            if st.session_state.get("对比数据时点") not in comparison_options:
+                st.session_state["对比数据时点"] = comparison_default
+            prior_month = st.selectbox(
+                "对比数据时点",
+                comparison_options,
+                format_func=lambda value: snapshot_display_label(value, status_by_snapshot.get(value)),
+                key="对比数据时点",
+            )
+            st.caption(
+                f"当前时点 {snapshot_display_label(current_month)} 对比 {snapshot_display_label(prior_month)}；"
+                "规模、账户和资产变化均以该对比时点为基准，收益指标仍采用当前时点的本月以来口径。"
             )
         else:
             prior_month = prior_candidates[-1] if prior_candidates else ""
@@ -3203,7 +3274,7 @@ def main() -> None:
     current_slice = snapshot_slice(data, current_month)
     prior_slice = snapshot_slice(data, prior_month)
     current_mv = float(current_slice["full_market_value"].sum())
-    if comparison_mode == "年初以来":
+    if comparison_mode == YEAR_TO_DATE_MODE:
         prior_mv = float(current_slice["market_value_year_open"].sum())
         current_fin = float(current_slice["finance_income_ytd"].sum())
         current_comp = float(current_slice["comprehensive_income_ytd"].sum())
@@ -3211,6 +3282,14 @@ def main() -> None:
         period_label = "年初以来截至时点" if current_snapshot_status == SNAPSHOT_STATUS_INTERIM else "年初以来"
         baseline_label = "年初"
         capital_label = "本年以来平均资金占用"
+    elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        prior_mv = float(prior_slice["full_market_value"].sum())
+        current_fin = float(current_slice["finance_income_mtd"].sum())
+        current_comp = float(current_slice["comprehensive_income_mtd"].sum())
+        current_capital = float(current_slice["avg_capital_mtd"].sum())
+        period_label = "当前时点本月截至" if current_snapshot_status == SNAPSHOT_STATUS_INTERIM else "当前时点本月"
+        baseline_label = "对比时点"
+        capital_label = "当前时点本月平均资金占用"
     else:
         prior_mv = float(prior_slice["full_market_value"].sum())
         current_fin = float(current_slice["finance_income_mtd"].sum())
@@ -3263,8 +3342,15 @@ def main() -> None:
 
     section_anchor("asset-class-overview")
     st.subheader("投资品种总览：规模变化与收益贡献")
-    scale_income_label = "年初以来综合收益" if comparison_mode == "年初以来" else "本月综合收益"
-    scale_baseline_label = "年初市值" if comparison_mode == "年初以来" else "上月市值"
+    if comparison_mode == YEAR_TO_DATE_MODE:
+        scale_income_label = "年初以来综合收益"
+        scale_baseline_label = "年初市值"
+    elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        scale_income_label = "当前时点本月综合收益"
+        scale_baseline_label = "对比时点市值"
+    else:
+        scale_income_label = "本月综合收益"
+        scale_baseline_label = "上月市值"
     show_block_note(
         f"本表不分账户，直接按投资品种汇总；股权/不动产相关品种用资产主题标明并强制纳入图表；右侧净规模变化 = 时点市值 - {scale_baseline_label} - {scale_income_label}，用于近似识别真实增减仓或资金进出。"
     )
@@ -3632,7 +3718,7 @@ def main() -> None:
     section_anchor("asset-evidence")
     st.subheader("资产证据")
     evidence_account = selected_account if manager_view_mode == "拆分账户" else ALL
-    if comparison_mode == "年初以来":
+    if comparison_mode == YEAR_TO_DATE_MODE:
         show_block_note(
             "本表用于把账户、品种、经理的结果追溯到资产明细；变化类型基于源表年初市值与当前市值判断，不等同于逐月交易明细。"
         )
@@ -3646,9 +3732,14 @@ def main() -> None:
         )
         evidence_options = asset_evidence_sort_options(comparison_mode)
     else:
-        show_block_note(
-            f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按当前数据时点和上一月正式快照 {snapshot_display_label(prior_month)} 是否出现及市值变化判断。"
-        )
+        if comparison_mode == SNAPSHOT_COMPARISON_MODE:
+            show_block_note(
+                f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按当前数据时点和选定对比时点 {snapshot_display_label(prior_month)} 是否出现及市值变化判断。"
+            )
+        else:
+            show_block_note(
+                f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按当前数据时点和上一月正式快照 {snapshot_display_label(prior_month)} 是否出现及市值变化判断。"
+            )
         evidence = asset_evidence(
             data,
             current_month,

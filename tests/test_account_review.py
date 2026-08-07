@@ -69,6 +69,37 @@ class AssetEvidenceTest(unittest.TestCase):
         self.assertEqual(len(summary), 1)
         self.assertEqual(float(summary["full_market_value_current"].iloc[0]), 16.0)
 
+    def test_custom_snapshot_comparison_uses_selected_baseline(self):
+        data = pd.DataFrame(
+            [
+                {
+                    "snapshot_date": "2026-07-16",
+                    "account_bucket": "传统",
+                    "asset_name": "基准资产",
+                    "full_market_value": 10.0,
+                    "avg_capital_mtd": 10.0,
+                    "finance_income_mtd": 0.1,
+                    "comprehensive_income_mtd": 0.2,
+                },
+                {
+                    "snapshot_date": "2026-07-31",
+                    "account_bucket": "传统",
+                    "asset_name": "当前资产",
+                    "full_market_value": 13.0,
+                    "avg_capital_mtd": 13.0,
+                    "finance_income_mtd": 0.3,
+                    "comprehensive_income_mtd": 0.4,
+                },
+            ]
+        )
+
+        summary = comparison_summary(data, "2026-07-31", "2026-07-16", ["account_bucket"], "时点对比")
+
+        self.assertEqual(len(summary), 1)
+        self.assertAlmostEqual(float(summary["full_market_value_prior"].iloc[0]), 10.0)
+        self.assertAlmostEqual(float(summary["full_market_value_delta"].iloc[0]), 3.0)
+        self.assertAlmostEqual(float(summary["comprehensive_income_mtd_current"].iloc[0]), 0.4)
+
     def test_extra_group_columns_keep_outsourced_books_separate(self):
         data = pd.DataFrame(
             [
