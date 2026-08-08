@@ -4,3 +4,4 @@ openpyxl
 pyarrow
 blinker
 altair
+plotly

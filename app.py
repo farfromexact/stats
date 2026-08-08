@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import altair as alt
+import plotly.graph_objects as go
 import streamlit as st
 
 try:
@@ -15,6 +16,7 @@ except ImportError:  # pragma: no cover - compatibility with older Streamlit
     StreamlitSecretNotFoundError = RuntimeError
 
 import account_review as account_review_module
+import manager_attribution as manager_attribution_module
 import strategy_books as strategy_books_module
 from config import DATA_DIR
 from portfolio_data import (
@@ -27,11 +29,25 @@ from portfolio_data import (
 )
 
 account_review_module = importlib.reload(account_review_module)
+manager_attribution_module = importlib.reload(manager_attribution_module)
 strategy_books_module = importlib.reload(strategy_books_module)
 
 asset_evidence = account_review_module.asset_evidence
 asset_evidence_year_open = account_review_module.asset_evidence_year_open
 comparison_summary = account_review_module.comparison_summary
+ATTRIBUTION_BOARD_EQUITY = manager_attribution_module.ATTRIBUTION_BOARD_EQUITY
+ATTRIBUTION_BOARD_FIXED = manager_attribution_module.ATTRIBUTION_BOARD_FIXED
+build_manager_attribution_rows = manager_attribution_module.build_manager_attribution_rows
+default_manager_entities = manager_attribution_module.default_manager_entities
+holding_position_change_status = manager_attribution_module.holding_position_change_status
+manager_asset_detail = manager_attribution_module.manager_asset_detail
+manager_exited_holdings = manager_attribution_module.manager_exited_holdings
+manager_holding_map = manager_attribution_module.manager_holding_map
+manager_attribution_change_summary = manager_attribution_module.manager_attribution_change_summary
+manager_attribution_coverage_summary = manager_attribution_module.manager_attribution_coverage_summary
+manager_attribution_summary = manager_attribution_module.manager_attribution_summary
+manager_attribution_timeseries = manager_attribution_module.manager_attribution_timeseries
+rank_manager_timeseries = manager_attribution_module.rank_manager_timeseries
 assign_strategy_book_columns = strategy_books_module.assign_strategy_book_columns
 STRATEGY_CLASSIFICATION_VERSION = strategy_books_module.STRATEGY_CLASSIFICATION_VERSION
 EQUITY_DASHBOARD_LABEL_ORDER = strategy_books_module.EQUITY_DASHBOARD_LABEL_ORDER
@@ -65,6 +81,28 @@ FUNDING_COLOR = "#6E7F92"
 HEATMAP_NEUTRAL_COLOR = "#F7F1E3"
 HEATMAP_POSITIVE_LIGHT = "#B7D0E4"
 HEATMAP_NEGATIVE_LIGHT = "#E3B6B0"
+MANAGER_ATTRIBUTION_COLORS = [
+    "#1B3A5C",
+    "#2F7A6B",
+    "#C08A2D",
+    "#7B5EA7",
+    "#3F7CAC",
+    "#8C3A3A",
+]
+MANAGER_ATTRIBUTION_MAX_COMPARISONS = 5
+MANAGER_ATTRIBUTION_PERIODS = {
+    YEAR_TO_DATE_MODE: {
+        "income": "comprehensive_income_ytd",
+        "return": "comprehensive_return_ytd",
+        "short_label": "YTD",
+    },
+    MONTH_REVIEW_MODE: {
+        "income": "comprehensive_income_mtd",
+        "return": "comprehensive_return_mtd",
+        "short_label": "MTD",
+    },
+}
+MANAGER_ATTRIBUTION_VIEW_OPTIONS = ["综合收益额", "综合收益率"]
 FUNDING_COST_RATE = 0.0341
 GUARANTEE_COST_RATE = 0.0324
 EFFECTIVE_COST_RATE = 0.0326
@@ -302,6 +340,10 @@ def apply_columbia_theme() -> None:
             margin: 0.65rem 0 0.85rem 0;
         }
 
+        .kpi-grid.kpi-grid-attribution {
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        }
+
         .kpi-card {
             min-height: 96px;
             background: rgba(255, 255, 255, 0.8);
@@ -328,6 +370,18 @@ def apply_columbia_theme() -> None:
             background: linear-gradient(180deg, rgba(47, 122, 107, 0.14) 0%, rgba(47, 122, 107, 0.06) 100%);
             border-color: rgba(47, 122, 107, 0.34);
             border-left-color: var(--rat-external);
+        }
+
+        .kpi-card.kpi-card-positive {
+            background: linear-gradient(180deg, rgba(47, 122, 107, 0.13) 0%, rgba(47, 122, 107, 0.04) 100%);
+            border-color: rgba(47, 122, 107, 0.32);
+            border-left-color: #2F7A6B;
+        }
+
+        .kpi-card.kpi-card-negative {
+            background: linear-gradient(180deg, rgba(140, 58, 58, 0.12) 0%, rgba(140, 58, 58, 0.035) 100%);
+            border-color: rgba(140, 58, 58, 0.28);
+            border-left-color: var(--columbia-crimson);
         }
 
         .kpi-label {
@@ -368,6 +422,50 @@ def apply_columbia_theme() -> None:
         .kpi-delta.kpi-delta-negative {
             color: var(--columbia-crimson);
             background: rgba(140, 58, 58, 0.12);
+        }
+
+        .attribution-coverage {
+            margin: 0.45rem 0 0.9rem 0;
+            padding: 0.75rem 0.9rem 0.7rem 0.9rem;
+            background: rgba(255, 255, 255, 0.68);
+            border: 1px solid var(--columbia-border);
+            border-radius: 6px;
+        }
+
+        .attribution-coverage-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            color: var(--columbia-navy);
+            font-size: 0.86rem;
+            font-weight: 700;
+        }
+
+        .attribution-coverage-head strong {
+            font-size: 1rem;
+        }
+
+        .attribution-coverage-track {
+            height: 6px;
+            margin: 0.55rem 0 0.5rem 0;
+            overflow: hidden;
+            background: rgba(140, 58, 58, 0.14);
+            border-radius: 999px;
+        }
+
+        .attribution-coverage-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #2F7A6B 0%, #6FA8C9 100%);
+            border-radius: inherit;
+        }
+
+        .attribution-coverage-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem 1rem;
+            color: var(--columbia-muted);
+            font-size: 0.78rem;
+            line-height: 1.45;
         }
 
         .decision-summary {
@@ -696,6 +794,7 @@ DISPLAY_NAMES = {
     "change_type": "变化类型",
     "full_market_value_current": "当前时点市值(亿)",
     "full_market_value_prior": "上月市值(亿)",
+    "prior_full_market_value": "上月末市值(亿)",
     "full_market_value_delta": "较上月变化(亿)",
     "net_full_market_value_delta": "扣收益后较上月规模变化(亿)",
     "ytd_position_flow_delta": "扣综合收益后较年初加减仓(亿)",
@@ -743,6 +842,16 @@ DISPLAY_NAMES = {
     "outsourced_equity_holding_type": "权益类型",
     "equity_scope": "范围",
     "equity_group_display_label": "比较项",
+    "attribution_board": "归因板块",
+    "attribution_scope": "委内/委外",
+    "attribution_entity_name": "投资经理/受托机构",
+    "avg_capital_mtd": "本月平均资本占用(亿)",
+    "avg_capital_ytd": "年初以来平均资本占用(亿)",
+    "comprehensive_income_ytd": "年初以来综合收益(亿)",
+    "comprehensive_return_ytd": "年初以来综合收益率",
+    "market_value_share": "当前市值占比",
+    "asset_count": "资产数量",
+    "row_count": "源表行数",
 }
 
 YTD_DISPLAY_OVERRIDES = {
@@ -771,8 +880,12 @@ AMOUNT_COLUMNS = {
     "full_market_value",
     "finance_income_mtd",
     "comprehensive_income_mtd",
+    "comprehensive_income_ytd",
+    "avg_capital_mtd",
+    "avg_capital_ytd",
     "full_market_value_current",
     "full_market_value_prior",
+    "prior_full_market_value",
     "full_market_value_delta",
     "net_full_market_value_delta",
     "ytd_position_flow_delta",
@@ -803,6 +916,8 @@ PCT_COLUMNS = {
     "actual_annualized_comprehensive_return",
     "income_completion_rate",
     "return_deviation",
+    "comprehensive_return_ytd",
+    "market_value_share",
 }
 DURATION_COLUMNS = {"duration", "weighted_duration"}
 COUNT_COLUMNS = {
@@ -812,6 +927,8 @@ COUNT_COLUMNS = {
     "source_rows_current",
     "source_rows_prior",
     "duration_asset_count",
+    "asset_count",
+    "row_count",
 }
 RUNTIME_COLUMN_DEFAULTS = {
     "market_value_year_open": 0.0,
@@ -1000,8 +1117,6 @@ def render_filter_pills(
     comparison_mode: str,
     prior_month: str,
     selected_account: str,
-    selected_asset_class: str,
-    selected_manager: str,
 ) -> None:
     current_label = snapshot_display_label(current_month)
     if comparison_mode == YEAR_TO_DATE_MODE:
@@ -1012,14 +1127,8 @@ def render_filter_pills(
         view_text = f"{current_label} 单月复盘，规模较 {snapshot_display_label(prior_month)}"
     items = [
         ("当前视角", view_text),
+        ("账户", selected_label(selected_account)),
     ]
-    items.extend(
-        [
-            ("账户", selected_label(selected_account)),
-            ("投资品种", selected_label(selected_asset_class)),
-            ("投资经理/受托机构", selected_label(selected_manager)),
-        ]
-    )
     pills = "".join(
         f'<div class="filter-pill"><span>{html_text(label)}</span>{html_text(value)}</div>'
         for label, value in items
@@ -1027,12 +1136,20 @@ def render_filter_pills(
     st.markdown(f'<div class="filter-pills">{pills}</div>', unsafe_allow_html=True)
 
 
-def render_kpi_grid(items: list[dict[str, str]]) -> None:
+def render_kpi_grid(
+    items: list[dict[str, str]],
+    grid_class: str = "",
+) -> None:
     cards = []
     for item in items:
         delta = item.get("delta", "")
         tone = item.get("tone", "")
-        tone_class = "kpi-card-internal" if tone == "internal" else "kpi-card-external" if tone == "external" else ""
+        tone_class = {
+            "internal": "kpi-card-internal",
+            "external": "kpi-card-external",
+            "positive": "kpi-card-positive",
+            "negative": "kpi-card-negative",
+        }.get(tone, "")
         delta_tone = item.get("delta_tone", "")
         delta_tone_class = (
             " kpi-delta-positive"
@@ -1051,7 +1168,11 @@ def render_kpi_grid(items: list[dict[str, str]]) -> None:
                 delta=delta_html,
             )
         )
-    st.markdown(f'<div class="kpi-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+    class_name = f"kpi-grid {grid_class}".strip()
+    st.markdown(
+        f'<div class="{html_text(class_name)}">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def metric_extreme(frame: pd.DataFrame, label_col: str, metric: str, ascending: bool) -> tuple[str, float] | None:
@@ -1117,7 +1238,7 @@ def render_decision_summary(
 def render_action_cards() -> None:
     actions = [
         ("看收益来源", "先看哪些投资品种贡献了本期结果。", "#asset-class-overview"),
-        ("追资产证据", "把收益贡献、拖累和规模变化落到单项资产。", "#asset-evidence"),
+        ("看经理归因", "从全体贡献继续穿透到经理或受托方的资产明细。", "#manager-attribution"),
         ("核对数据质量", "优先处理未分配经理、异常收益率和负收益资产。", "#quality-checks"),
     ]
     cards = "".join(
@@ -1262,10 +1383,10 @@ def sidebar_nav() -> None:
         <a class="sidebar-nav-button" href="#asset-class-overview">投资品种图表/表格</a>
         <a class="sidebar-nav-button" href="#equity-dashboard">股票专项看板</a>
         <a class="sidebar-nav-button" href="#strategy-book-overview">委内/委外比较</a>
+        <a class="sidebar-nav-button" href="#manager-attribution">经理/受托归因</a>
         <a class="sidebar-nav-button" href="#account-overview">账户层图表/表格</a>
         <a class="sidebar-nav-button" href="#duration-overview">账户久期</a>
         <a class="sidebar-nav-button" href="#account-class-breakdown">账户内品种拆解</a>
-        <a class="sidebar-nav-button" href="#asset-evidence">资产证据</a>
         <a class="sidebar-nav-button" href="#quality-checks">数据质量</a>
         """,
         unsafe_allow_html=True,
@@ -1352,7 +1473,7 @@ def render_quality_bar(quality: dict[str, int]) -> None:
     for col, (name, count) in zip(cols, quality.items()):
         col.metric(name, f"{count:,}")
     st.caption(
-        "质量提示：未分配经理、缺省分类、异常收益率和负收益资产用于提示阅读风险，不代表数据错误；需要结合资产证据进一步核对。"
+        "质量提示：未分配经理、缺省分类、异常收益率和负收益资产用于提示阅读风险，不代表数据错误；需要结合对应模块的资产明细进一步核对。"
     )
 
 
@@ -3118,6 +3239,1125 @@ def render_heatmap(class_summary: pd.DataFrame, selected_account: str, compariso
     st.caption("颜色说明：两张热力图共用账户和投资品种排序；颜色按排名强度展示，正数使用浅蓝到深蓝，负数使用浅红到深红，精确值以 tooltip 和下方表格为准；正回购、逆回购按回购/融资科目处理，使用中性灰蓝色。")
 
 
+def manager_attribution_metric_config(
+    period_choice: str,
+    view_choice: str,
+) -> tuple[str, str, str, str]:
+    period = MANAGER_ATTRIBUTION_PERIODS.get(
+        period_choice,
+        MANAGER_ATTRIBUTION_PERIODS[YEAR_TO_DATE_MODE],
+    )
+    metric_kind = "return" if view_choice == "综合收益率" else "income"
+    metric = str(period[metric_kind])
+    short_label = str(period["short_label"])
+    if metric_kind == "return":
+        return metric, f"{short_label}综合收益率", f"{short_label}综合收益率", ".1%"
+    return metric, f"{short_label}综合收益额", f"{short_label}综合收益额(亿)", ",.1f"
+
+
+def _manager_extreme(
+    frame: pd.DataFrame,
+    metric: str,
+    direction: str,
+) -> pd.Series | None:
+    if frame.empty or metric not in frame.columns:
+        return None
+    working = frame.copy()
+    working[metric] = pd.to_numeric(working[metric], errors="coerce")
+    if direction == "positive":
+        working = working[working[metric] > CHART_EPSILON]
+        working = working.sort_values(metric, ascending=False)
+    else:
+        working = working[working[metric] < -CHART_EPSILON]
+        working = working.sort_values(metric, ascending=True)
+    return None if working.empty else working.iloc[0]
+
+
+def _manager_focus_rows(
+    frame: pd.DataFrame,
+    metric: str,
+    limit: int = 14,
+) -> pd.DataFrame:
+    if frame.empty or metric not in frame.columns:
+        return frame.iloc[0:0].copy()
+    working = frame.copy()
+    working[metric] = pd.to_numeric(working[metric], errors="coerce")
+    working = working.dropna(subset=[metric])
+    working = working[working[metric].abs() > CHART_EPSILON]
+    if len(working) <= limit:
+        return working.sort_values(metric, ascending=False).reset_index(drop=True)
+
+    positive_limit = limit // 2
+    negative_limit = limit - positive_limit
+    positive = working[working[metric] > 0].nlargest(positive_limit, metric)
+    negative = working[working[metric] < 0].nsmallest(negative_limit, metric)
+    selected_ids = set(
+        pd.concat([positive, negative], ignore_index=True)["attribution_entity_id"]
+        .astype(str)
+        .tolist()
+    )
+    remaining = limit - len(selected_ids)
+    if remaining > 0:
+        extras = (
+            working[
+                ~working["attribution_entity_id"].astype(str).isin(selected_ids)
+            ]
+            .assign(_abs_metric=lambda data: data[metric].abs())
+            .nlargest(remaining, "_abs_metric")
+            .drop(columns="_abs_metric")
+        )
+        focus = pd.concat([positive, negative, extras], ignore_index=True)
+    else:
+        focus = pd.concat([positive, negative], ignore_index=True)
+    return (
+        focus.drop_duplicates("attribution_entity_id")
+        .sort_values(metric, ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+def render_manager_attribution_coverage(
+    coverage: dict[str, float],
+    current_snapshot: str,
+) -> None:
+    coverage_ratio = float(coverage.get("market_value_coverage", np.nan))
+    net_coverage = float(coverage.get("net_market_value_coverage", np.nan))
+    row_coverage = float(coverage.get("row_coverage", np.nan))
+    bar_ratio = min(max(coverage_ratio, 0.0), 1.0) if np.isfinite(coverage_ratio) else 0.0
+    ratio_label = pct(coverage_ratio)
+    st.markdown(
+        f"""
+        <div class="attribution-coverage">
+            <div class="attribution-coverage-head">
+                <span>归因完整性 · {html_text(snapshot_display_label(current_snapshot))}</span>
+                <strong>{html_text(ratio_label)}</strong>
+            </div>
+            <div class="attribution-coverage-track">
+                <div class="attribution-coverage-fill" style="width:{bar_ratio * 100:.2f}%"></div>
+            </div>
+            <div class="attribution-coverage-meta">
+                <span>按绝对市值计算，避免正负调节项互相抵消</span>
+                <span>签名净额归属比 {html_text(pct(net_coverage))}（受正负调节影响可超 100%）</span>
+                <span>行覆盖 {html_text(pct(row_coverage))}</span>
+                <span>未归属绝对市值 {html_text(amount(float(coverage.get('unattributed_absolute_market_value', 0.0))))} / 净额 {html_text(amount(float(coverage.get('unattributed_market_value', 0.0))))}</span>
+                <span>层级去重 {html_text(amount(float(coverage.get('excluded_market_value', 0.0))))} / {int(coverage.get('excluded_row_count', 0)):,} 行</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_manager_attribution_overview(
+    summary: pd.DataFrame,
+    changes: pd.DataFrame,
+    period_choice: str,
+) -> None:
+    period = MANAGER_ATTRIBUTION_PERIODS[period_choice]
+    income_metric = str(period["income"])
+    short_label = str(period["short_label"])
+    contributor = _manager_extreme(summary, income_metric, "positive")
+    detractor = _manager_extreme(summary, income_metric, "negative")
+    increase = _manager_extreme(changes, "estimated_flow", "positive")
+    decrease = _manager_extreme(changes, "estimated_flow", "negative")
+    income_values = pd.to_numeric(summary[income_metric], errors="coerce").fillna(0.0)
+    total_income = float(income_values.sum())
+    positive_count = int((income_values > CHART_EPSILON).sum())
+    negative_count = int((income_values < -CHART_EPSILON).sum())
+
+    def extreme_card(
+        row: pd.Series | None,
+        *,
+        label: str,
+        metric: str,
+        empty_value: str,
+        tone: str,
+    ) -> dict[str, str]:
+        if row is None:
+            return {"label": label, "value": empty_value, "delta": "当前口径无记录"}
+        scope = str(row.get("attribution_scope", "")).strip()
+        delta = signed_amount(float(row[metric]))
+        if scope:
+            delta = f"{delta} · {scope}"
+        return {
+            "label": label,
+            "value": str(row["attribution_entity_name"]),
+            "delta": delta,
+            "delta_tone": tone,
+            "tone": tone,
+        }
+
+    cards: list[dict[str, str]] = [
+        {
+            "label": "当前归因市值",
+            "value": amount(float(summary["full_market_value"].sum())),
+            "delta": f"{len(summary):,} 个主体",
+        },
+        {
+            "label": f"{short_label}综合收益",
+            "value": signed_amount(total_income),
+            "delta": f"{positive_count} 个贡献 / {negative_count} 个拖累",
+            "delta_tone": "positive" if total_income >= 0 else "negative",
+            "tone": "positive" if total_income >= 0 else "negative",
+        },
+        extreme_card(
+            contributor,
+            label="贡献第一",
+            metric=income_metric,
+            empty_value="本期无正贡献",
+            tone="positive",
+        ),
+        extreme_card(
+            detractor,
+            label="拖累第一",
+            metric=income_metric,
+            empty_value="本期无负贡献",
+            tone="negative",
+        ),
+        extreme_card(
+            increase,
+            label="估算净增配最大",
+            metric="estimated_flow",
+            empty_value="本期无净增配" if not changes.empty else "暂无可比时点",
+            tone="positive",
+        ),
+        extreme_card(
+            decrease,
+            label="估算净减配最大",
+            metric="estimated_flow",
+            empty_value="本期无净减配" if not changes.empty else "暂无可比时点",
+            tone="negative",
+        ),
+    ]
+    render_kpi_grid(cards, grid_class="kpi-grid-attribution")
+    if not changes.empty:
+        prior_snapshot = str(changes["prior_snapshot_date"].iloc[0])
+        st.caption(
+            f"估算净配置变化 = 当前市值 − {prior_snapshot} 月末市值 − 当前MTD综合收益；"
+            "用于复盘资金方向，不等同于交易流水。"
+        )
+
+
+def render_manager_contribution_ranking(
+    summary: pd.DataFrame,
+    period_choice: str,
+) -> None:
+    period = MANAGER_ATTRIBUTION_PERIODS[period_choice]
+    income_metric = str(period["income"])
+    return_metric = str(period["return"])
+    short_label = str(period["short_label"])
+    chart_data = summary.copy()
+    chart_data[income_metric] = pd.to_numeric(chart_data[income_metric], errors="coerce")
+    chart_data = chart_data.dropna(subset=[income_metric]).reset_index(drop=True)
+    st.markdown(f"#### {short_label}贡献 / 拖累全景")
+    if chart_data.empty:
+        st.info("当前口径暂无非零收益贡献可供展示。")
+        return
+
+    chart_data = chart_data.copy()
+    chart_data[return_metric] = pd.to_numeric(chart_data[return_metric], errors="coerce")
+    chart_data["full_market_value"] = pd.to_numeric(
+        chart_data["full_market_value"], errors="coerce"
+    )
+    chart_data["_entity_label"] = (
+        chart_data["attribution_entity_name"].astype(str)
+        + " · "
+        + chart_data["attribution_scope"].astype(str)
+    )
+    chart_data["_value"] = pd.to_numeric(chart_data[income_metric], errors="coerce")
+    chart_data["_value_label"] = chart_data["_value"].map(lambda value: f"{value:+,.2f}")
+    chart_data["_direction"] = np.where(chart_data["_value"] >= 0, "贡献", "拖累")
+    full_ranks = pd.to_numeric(summary[income_metric], errors="coerce").rank(
+        method="min",
+        ascending=False,
+    )
+    rank_map = dict(zip(summary["attribution_entity_id"].astype(str), full_ranks))
+    chart_data["_board_rank"] = chart_data["attribution_entity_id"].astype(str).map(rank_map)
+    chart_data["_rank_label"] = chart_data["_board_rank"].map(
+        lambda value: f"第 {int(value)} / {full_ranks.count()} 名" if pd.notna(value) else "无排名"
+    )
+    value_span = max(
+        float(chart_data["_value"].max() - chart_data["_value"].min()),
+        float(chart_data["_value"].abs().max()),
+        1.0,
+    )
+    domain = [
+        min(float(chart_data["_value"].min()), 0.0) - value_span * 0.12,
+        max(float(chart_data["_value"].max()), 0.0) + value_span * 0.12,
+    ]
+    y_encoding = alt.Y(
+        "_entity_label:N",
+        title=None,
+        sort=alt.SortField(field="_value", order="descending"),
+        axis=alt.Axis(labelLimit=250),
+    )
+    x_encoding = alt.X(
+        "_value:Q",
+        title=f"{short_label}综合收益额(亿)",
+        scale=alt.Scale(domain=domain),
+        axis=alt.Axis(format=",.1f"),
+    )
+    tooltips = [
+        alt.Tooltip("_entity_label:N", title="归因主体"),
+        alt.Tooltip("_value:Q", title=f"{short_label}综合收益额(亿)", format=",.2f"),
+        alt.Tooltip(f"{return_metric}:Q", title=f"{short_label}综合收益率", format=".2%"),
+        alt.Tooltip("full_market_value:Q", title="当前市值(亿)", format=",.2f"),
+        alt.Tooltip("_rank_label:N", title="全板块排名"),
+    ]
+    bars = (
+        alt.Chart(chart_data)
+        .mark_bar(cornerRadiusEnd=3)
+        .encode(
+            x=x_encoding,
+            y=y_encoding,
+            color=alt.Color(
+                "_direction:N",
+                title=None,
+                scale=alt.Scale(
+                    domain=["贡献", "拖累"],
+                    range=["#2F7A6B", NEGATIVE_COLOR],
+                ),
+                legend=None,
+            ),
+            tooltip=tooltips,
+        )
+    )
+    zero_rule = alt.Chart(pd.DataFrame({"x": [0.0]})).mark_rule(
+        color="#64748B",
+        opacity=0.65,
+    ).encode(x="x:Q")
+    positive_labels = (
+        alt.Chart(chart_data[chart_data["_value"] >= 0])
+        .mark_text(align="left", baseline="middle", dx=7, fontSize=11, fontWeight=600)
+        .encode(x=x_encoding, y=y_encoding, text="_value_label:N")
+    )
+    negative_labels = (
+        alt.Chart(chart_data[chart_data["_value"] < 0])
+        .mark_text(align="right", baseline="middle", dx=-7, fontSize=11, fontWeight=600)
+        .encode(x=x_encoding, y=y_encoding, text="_value_label:N")
+    )
+    chart = (
+        (bars + zero_rule + positive_labels + negative_labels)
+        .properties(height=max(320, len(chart_data) * 26))
+        .configure_view(strokeWidth=0)
+    )
+    st.altair_chart(chart, width="stretch")
+    st.caption(
+        f"已展示 {len(chart_data)} / {len(summary)} 个主体（含零收益主体）；"
+        f"条形长度代表收益额，绿色为贡献、红色为拖累，排名基于全部{len(summary)}个主体。"
+    )
+
+
+def render_manager_asset_contribution_chart(
+    asset_detail: pd.DataFrame,
+    period_choice: str,
+) -> None:
+    period = MANAGER_ATTRIBUTION_PERIODS[period_choice]
+    income_metric = str(period["income"])
+    return_metric = str(period["return"])
+    short_label = str(period["short_label"])
+    st.markdown("#### 资产收益贡献 / 拖累")
+    if asset_detail.empty or income_metric not in asset_detail.columns:
+        st.info("当前主体暂无资产收益贡献可供展示。")
+        return
+
+    working = asset_detail.copy()
+    working[income_metric] = pd.to_numeric(working[income_metric], errors="coerce")
+    working[return_metric] = pd.to_numeric(working[return_metric], errors="coerce")
+    working = working.dropna(subset=[income_metric])
+    working = working[working[income_metric].abs() > CHART_EPSILON]
+    if working.empty:
+        st.info("当前主体暂无非零资产收益贡献。")
+        return
+    working["attribution_entity_id"] = working["asset_key"].astype(str)
+    chart_data = _manager_focus_rows(working, income_metric, limit=12)
+    duplicate_names = chart_data["asset_name"].astype(str).duplicated(keep=False)
+    chart_data["_asset_label"] = chart_data["asset_name"].astype(str)
+    chart_data.loc[duplicate_names, "_asset_label"] = (
+        chart_data.loc[duplicate_names, "asset_name"].astype(str)
+        + " · "
+        + chart_data.loc[duplicate_names, "account_bucket"].astype(str)
+    )
+    chart_data["_value"] = pd.to_numeric(chart_data[income_metric], errors="coerce")
+    chart_data["_value_label"] = chart_data["_value"].map(lambda value: f"{value:+,.2f}")
+    chart_data["_direction"] = np.where(chart_data["_value"] >= 0, "贡献", "拖累")
+    y_encoding = alt.Y(
+        "_asset_label:N",
+        title=None,
+        sort=alt.SortField(field="_value", order="descending"),
+        axis=alt.Axis(labelLimit=260),
+    )
+    bars = (
+        alt.Chart(chart_data)
+        .mark_bar(cornerRadiusEnd=3)
+        .encode(
+            x=alt.X("_value:Q", title=f"{short_label}综合收益额(亿)", axis=alt.Axis(format=",.1f")),
+            y=y_encoding,
+            color=alt.Color(
+                "_direction:N",
+                scale=alt.Scale(domain=["贡献", "拖累"], range=["#2F7A6B", NEGATIVE_COLOR]),
+                legend=None,
+            ),
+            tooltip=[
+                alt.Tooltip("asset_name:N", title="资产名称"),
+                alt.Tooltip("asset_class:N", title="投资品种"),
+                alt.Tooltip("account_bucket:N", title="账户"),
+                alt.Tooltip("_value:Q", title=f"{short_label}综合收益额(亿)", format=",.2f"),
+                alt.Tooltip(f"{return_metric}:Q", title=f"{short_label}综合收益率", format=".2%"),
+                alt.Tooltip("full_market_value:Q", title="当前市值(亿)", format=",.2f"),
+            ],
+        )
+    )
+    zero_rule = alt.Chart(pd.DataFrame({"x": [0.0]})).mark_rule(
+        color="#64748B",
+        opacity=0.65,
+    ).encode(x="x:Q")
+    chart = (bars + zero_rule).properties(height=max(300, len(chart_data) * 30)).configure_view(strokeWidth=0)
+    st.altair_chart(chart, width="stretch")
+    st.caption("本图按收益额直接展示资产贡献与拖累；持仓规模结构在下方单独呈现。")
+
+
+def manager_attribution_entity_labels(summary: pd.DataFrame) -> dict[str, str]:
+    if summary.empty:
+        return {}
+    return {
+        str(row["attribution_entity_id"]): (
+            f"{row['attribution_entity_name']} · {row['attribution_scope']}"
+        )
+        for _, row in summary.iterrows()
+    }
+
+
+def render_manager_attribution_timeseries_chart(
+    timeseries: pd.DataFrame,
+    selected_entities: list[str],
+    entity_labels: dict[str, str],
+    primary_entity: str,
+    metric: str,
+    metric_label: str,
+    value_title: str,
+    axis_format: str,
+    chart_key: str,
+) -> None:
+    ranked_data = rank_manager_timeseries(
+        timeseries,
+        selected_entities,
+        metric,
+    )
+    chart_data = ranked_data.dropna(subset=[metric]).copy()
+    if chart_data.empty:
+        st.info("所选主体在当前时点范围内暂无可展示的趋势数据。")
+        return
+
+    chart_data["_snapshot_label"] = chart_data["snapshot_date"].astype(str)
+    interim = chart_data["snapshot_status"].eq(SNAPSHOT_STATUS_INTERIM)
+    chart_data.loc[interim, "_snapshot_label"] += "（临时）"
+    chart_data = chart_data.sort_values("snapshot_date")
+    chart_data["_rank_label"] = chart_data.apply(
+        lambda row: (
+            f"全板块第 {int(row['board_rank'])} / {int(row['board_count'])} 名"
+            if pd.notna(row["board_rank"]) and pd.notna(row["board_count"])
+            else "全板块无排名"
+        ),
+        axis=1,
+    )
+    if metric.startswith("comprehensive_return"):
+        chart_data["_value_label"] = chart_data[metric].map(pct)
+    else:
+        chart_data["_value_label"] = chart_data[metric].map(amount)
+
+    snapshot_metadata = timeseries[
+        ["snapshot_date", "snapshot_status"]
+    ].drop_duplicates("snapshot_date").copy()
+    snapshot_metadata["snapshot_date"] = snapshot_metadata["snapshot_date"].astype(str)
+    snapshot_metadata["_snapshot_label"] = snapshot_metadata["snapshot_date"]
+    snapshot_labels = snapshot_metadata.set_index("snapshot_date")["_snapshot_label"].to_dict()
+    interim_dates = set(
+        timeseries.loc[
+            timeseries["snapshot_status"].eq(SNAPSHOT_STATUS_INTERIM),
+            "snapshot_date",
+        ].astype(str)
+    )
+    for snapshot_date in interim_dates:
+        snapshot_labels[snapshot_date] = f"{snapshot_date}（临时）"
+    all_snapshot_dates = sorted(timeseries["snapshot_date"].astype(str).unique().tolist())
+    hover_anchor = float(chart_data[metric].median())
+    figure = go.Figure()
+    for entity_index, entity_id in enumerate(selected_entities):
+        entity_data = chart_data[
+            chart_data["attribution_entity_id"].astype(str).eq(str(entity_id))
+        ].sort_values("snapshot_date")
+        label = entity_labels.get(str(entity_id), str(entity_id))
+        is_primary = str(entity_id) == str(primary_entity)
+        trace_label = f"{label}（观察）" if is_primary else label
+        color = MANAGER_ATTRIBUTION_COLORS[
+            entity_index % len(MANAGER_ATTRIBUTION_COLORS)
+        ]
+        figure.add_trace(
+            go.Scatter(
+                x=pd.to_datetime(entity_data["snapshot_date"], errors="coerce"),
+                y=entity_data[metric],
+                mode="lines+markers",
+                name=trace_label,
+                connectgaps=False,
+                line={
+                    "color": color,
+                    "width": 3.6 if is_primary else 2.1,
+                    "dash": "solid",
+                },
+                marker={
+                    "size": 9 if is_primary else 7,
+                    "color": color,
+                    "line": {"color": "#FFFFFF", "width": 1.2},
+                },
+                hoverinfo="skip",
+            )
+        )
+
+        hover_rows = pd.DataFrame({"snapshot_date": all_snapshot_dates})
+        hover_rows = hover_rows.merge(
+            entity_data[
+                ["snapshot_date", "_rank_label", "_value_label"]
+            ].assign(snapshot_date=lambda frame: frame["snapshot_date"].astype(str)),
+            how="left",
+            on="snapshot_date",
+        )
+        hover_rows["_entity_label"] = trace_label
+        hover_rows["_rank_label"] = hover_rows["_rank_label"].fillna("无排名")
+        hover_rows["_value_label"] = hover_rows["_value_label"].fillna("无数据")
+        hover_rows["_snapshot_label"] = hover_rows["snapshot_date"].map(snapshot_labels)
+        figure.add_trace(
+            go.Scatter(
+                x=pd.to_datetime(hover_rows["snapshot_date"], errors="coerce"),
+                y=[hover_anchor] * len(hover_rows),
+                mode="markers",
+                name=label,
+                showlegend=False,
+                marker={"size": 16, "color": "rgba(0,0,0,0)"},
+                customdata=hover_rows[
+                    ["_entity_label", "_rank_label", "_value_label", "_snapshot_label"]
+                ].to_numpy(),
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b>｜%{customdata[1]}｜%{customdata[2]}"
+                    "<extra></extra>"
+                ),
+            )
+        )
+
+    date_axis_values = pd.to_datetime(
+        sorted(chart_data["snapshot_date"].astype(str).unique().tolist())
+    ).tolist()
+    st.markdown(f"##### {metric_label}趋势")
+    figure.update_layout(
+        height=430,
+        margin={"t": 66, "r": 22, "b": 62, "l": 70},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"family": "Microsoft YaHei, Arial, sans-serif", "color": "#4B5563"},
+        hovermode="x unified",
+        hoverdistance=-1,
+        hoverlabel={
+            "bgcolor": "#FFFBF3",
+            "bordercolor": "#C7B27A",
+            "font": {"color": "#0D1B2A", "size": 13},
+            "namelength": -1,
+        },
+        legend={
+            "orientation": "h",
+            "x": 0,
+            "y": 1.08,
+            "xanchor": "left",
+            "yanchor": "bottom",
+            "font": {"size": 12},
+        },
+        xaxis={
+            "title": None,
+            "tickmode": "array",
+            "tickvals": date_axis_values,
+            "tickformat": "%Y-%m-%d",
+            "tickangle": -20,
+            "showgrid": False,
+            "showspikes": True,
+            "spikemode": "across",
+            "spikesnap": "cursor",
+            "spikecolor": "#94A3B8",
+            "spikethickness": 1,
+        },
+        yaxis={
+            "title": value_title,
+            "tickformat": axis_format,
+            "rangemode": "normal" if metric.startswith("comprehensive_return") else "tozero",
+            "gridcolor": "#E3E8ED",
+            "zerolinecolor": "#94A3B8",
+            "zerolinewidth": 1,
+        },
+    )
+    st.plotly_chart(
+        figure,
+        width="stretch",
+        config={"displayModeBar": False, "scrollZoom": False},
+        key=chart_key,
+    )
+    st.caption("悬浮任一数据时点，可同时查看观察主体与比较主体的指标值；排名均按该时点全板块主体计算。")
+
+
+def render_manager_holding_treemap(
+    holdings: pd.DataFrame,
+    asset_detail: pd.DataFrame,
+    chart_key: str,
+    period_choice: str = YEAR_TO_DATE_MODE,
+) -> None:
+    st.markdown("#### 持仓规模结构")
+    if holdings.empty:
+        st.info("当前主体暂无正市值持仓可供展示，完整记录仍保留在下方资产明细中。")
+        return
+    prior_snapshot_date = str(holdings["prior_snapshot_date"].iloc[0] or "")
+    prior_available = bool(prior_snapshot_date)
+    if prior_available:
+        st.caption(
+            f"面积代表当前市值，百分比为正市值持仓占比；较 {prior_snapshot_date} 月末："
+            "↑ 估算加仓，↓ 估算减仓，NEW 新建仓，→ 基本持平。"
+            "加减仓按市值变化扣除本月综合收益估算，并非交易流水。"
+        )
+    else:
+        st.caption("面积代表当前市值，百分比为正市值持仓占比；暂无上一月末正式版，因此不显示仓位变化标记。")
+
+    palette = [
+        "#1B3A5C",
+        "#2F7A6B",
+        "#B07A27",
+        "#6B5791",
+        "#3F70A3",
+        "#8C3A3A",
+        "#397A87",
+        "#755744",
+        "#536574",
+    ]
+    class_order = holdings.groupby("asset_class", dropna=False)["full_market_value"].sum().sort_values(ascending=False).index.tolist()
+    color_map = {asset_class: palette[index % len(palette)] for index, asset_class in enumerate(class_order)}
+    period_config = MANAGER_ATTRIBUTION_PERIODS[period_choice]
+    income_metric = str(period_config["income"])
+    return_metric = str(period_config["return"])
+    capital_metric = "avg_capital_ytd" if period_choice == YEAR_TO_DATE_MODE else "avg_capital_mtd"
+    period_label = str(period_config["short_label"])
+
+    class_summary = (
+        holdings.groupby("asset_class", dropna=False)
+        .agg(
+            full_market_value=("full_market_value", "sum"),
+            market_value_share=("market_value_share", "sum"),
+            prior_full_market_value=("prior_full_market_value", "sum"),
+            monthly_position_flow_delta=("monthly_position_flow_delta", "sum"),
+            period_income=(income_metric, "sum"),
+            period_capital=(capital_metric, "sum"),
+            holding_count=("holding_count", "sum"),
+        )
+        .reindex(class_order)
+        .reset_index()
+    )
+    class_summary["period_return"] = np.where(
+        class_summary["period_capital"] > RETURN_BASE_THRESHOLD,
+        class_summary["period_income"] / class_summary["period_capital"],
+        np.nan,
+    )
+    if not prior_available:
+        class_summary["prior_full_market_value"] = np.nan
+        class_summary["monthly_position_flow_delta"] = np.nan
+    class_summary["position_change_status"] = class_summary.apply(
+        lambda row: holding_position_change_status(
+            float(row["full_market_value"]),
+            float(row["prior_full_market_value"]),
+            float(row["monthly_position_flow_delta"]),
+            prior_available,
+        ),
+        axis=1,
+    )
+
+    labels: list[str] = []
+    node_ids: list[str] = []
+    parents: list[str] = []
+    values: list[float] = []
+    colors: list[str] = []
+    hover_data: list[list[str]] = []
+
+    def add_node(
+        *,
+        label: str,
+        node_id: str,
+        parent: str,
+        asset_class: str,
+        market_value: float,
+        market_value_share: float,
+        period_income: float,
+        period_return: float,
+        prior_market_value: float,
+        position_flow_delta: float,
+        position_change_status: str,
+        note: str,
+    ) -> None:
+        badge = {
+            "new": "NEW",
+            "increase": "↑",
+            "decrease": "↓",
+            "flat": "→",
+            "unavailable": "",
+        }.get(position_change_status, "")
+        if position_change_status == "new":
+            change_description = "NEW 新建仓"
+        elif position_change_status == "increase":
+            change_description = f"↑ 估算加仓 {signed_amount(position_flow_delta)}"
+        elif position_change_status == "decrease":
+            change_description = f"↓ 估算减仓 {signed_amount(position_flow_delta)}"
+        elif position_change_status == "flat":
+            change_description = "→ 基本持平"
+        else:
+            change_description = "暂无上一月末正式版"
+        labels.append(label)
+        node_ids.append(node_id)
+        parents.append(parent)
+        values.append(market_value)
+        colors.append(color_map[asset_class])
+        hover_data.append(
+            [
+                asset_class,
+                amount(market_value),
+                pct(market_value_share),
+                signed_amount(period_income),
+                pct(period_return),
+                note,
+                badge,
+                prior_snapshot_date or "—",
+                amount(prior_market_value) if prior_available else "—",
+                change_description,
+            ]
+        )
+
+    for class_index, class_row in class_summary.iterrows():
+        asset_class = str(class_row["asset_class"])
+        class_id = f"asset-class-{class_index}"
+        class_count = int(class_row["holding_count"])
+        add_node(
+            label=asset_class,
+            node_id=class_id,
+            parent="",
+            asset_class=asset_class,
+            market_value=float(class_row["full_market_value"]),
+            market_value_share=float(class_row["market_value_share"]),
+            period_income=float(class_row["period_income"]),
+            period_return=float(class_row["period_return"]),
+            prior_market_value=float(class_row["prior_full_market_value"]),
+            position_flow_delta=float(class_row["monthly_position_flow_delta"]),
+            position_change_status=str(class_row["position_change_status"]),
+            note=f"共 {class_count:,} 项持仓",
+        )
+        class_holdings = holdings[holdings["asset_class"].astype(str).eq(asset_class)]
+        for holding_index, holding in class_holdings.iterrows():
+            holding_count = int(holding["holding_count"])
+            note = "单项资产" if holding["holding_kind"] == "单项资产" else f"合并 {holding_count:,} 项长尾持仓"
+            add_node(
+                label=str(holding["holding_label"]),
+                node_id=f"holding-{class_index}-{holding_index}",
+                parent=class_id,
+                asset_class=asset_class,
+                market_value=float(holding["full_market_value"]),
+                market_value_share=float(holding["market_value_share"]),
+                period_income=float(holding[income_metric]),
+                period_return=float(holding[return_metric]),
+                prior_market_value=float(holding["prior_full_market_value"]),
+                position_flow_delta=float(holding["monthly_position_flow_delta"]),
+                position_change_status=str(holding["position_change_status"]),
+                note=note,
+            )
+
+    figure = go.Figure(
+        go.Treemap(
+            labels=labels,
+            ids=node_ids,
+            parents=parents,
+            values=values,
+            branchvalues="total",
+            customdata=hover_data,
+            marker={"colors": colors, "line": {"color": "#FFFBF3", "width": 2}},
+            texttemplate="<b>%{label}</b><br>%{customdata[2]} %{customdata[6]}",
+            hovertemplate=(
+                "<b>%{label}</b><br>"
+                "投资品种：%{customdata[0]}<br>"
+                "当前市值：%{customdata[1]}<br>"
+                "正市值持仓占比：%{customdata[2]}<br>"
+                f"{period_label} 综合收益：%{{customdata[3]}}<br>"
+                f"{period_label} 综合收益率：%{{customdata[4]}}<br>"
+                "上月末时点：%{customdata[7]}<br>"
+                "上月末市值：%{customdata[8]}<br>"
+                "仓位变化：%{customdata[9]}<br>"
+                "%{customdata[5]}"
+                "<extra></extra>"
+            ),
+            tiling={"packing": "squarify", "pad": 2},
+            pathbar={"visible": False},
+        )
+    )
+    figure.update_layout(
+        height=520,
+        margin={"t": 8, "r": 8, "b": 8, "l": 8},
+        paper_bgcolor="rgba(0,0,0,0)",
+        font={"family": "Microsoft YaHei, Arial, sans-serif", "color": "#FFFFFF", "size": 13},
+        uniformtext={"minsize": 10, "mode": "hide"},
+    )
+    st.plotly_chart(
+        figure,
+        width="stretch",
+        config={"displayModeBar": False, "scrollZoom": False},
+        key=chart_key,
+    )
+
+    if not asset_detail.empty:
+        market_values = pd.to_numeric(asset_detail["full_market_value"], errors="coerce").fillna(0.0)
+        omitted = asset_detail[market_values <= RETURN_BASE_THRESHOLD]
+        if not omitted.empty:
+            st.caption(
+                f"另有 {len(omitted):,} 条零值或负值调节记录未占用地图面积"
+                f"（合计 {float(market_values.loc[omitted.index].sum()):,.2f} 亿），仍保留在下方资产明细中。"
+            )
+
+
+def render_manager_exited_holdings(
+    exited_holdings: pd.DataFrame,
+    prior_snapshot: str,
+    table_key: str,
+) -> None:
+    if exited_holdings.empty:
+        return
+    st.markdown("#### 本月完全退出资产")
+    st.caption(
+        f"以下资产在当前时点市值已归零，因此不进入持仓面积图；"
+        f"仍按 {prior_snapshot} 月末市值保留在减持复盘中。"
+    )
+    if len(exited_holdings) > 50:
+        st.caption(f"完全退出资产共 {len(exited_holdings):,} 项，按估算减配幅度展示前 50 项。")
+    st.dataframe(
+        format_table(
+            exited_holdings.head(50)[
+                [
+                    "asset_name",
+                    "asset_class",
+                    "account_bucket",
+                    "prior_full_market_value",
+                    "full_market_value_delta",
+                    "monthly_position_flow_delta",
+                ]
+            ],
+            comparison_mode=SNAPSHOT_COMPARISON_MODE,
+        ),
+        width="stretch",
+        hide_index=True,
+        key=table_key,
+    )
+
+
+def render_manager_attribution_tab(
+    attribution_rows: pd.DataFrame,
+    current_snapshot: str,
+    prior_snapshot: str,
+    board: str,
+    period_choice: str,
+    trend_view: str,
+    include_interim: bool,
+) -> None:
+    summary = manager_attribution_summary(attribution_rows, current_snapshot, board)
+    if summary.empty:
+        st.info(f"当前时点暂无{board}经理或受托方可供归因。")
+        return
+
+    period = MANAGER_ATTRIBUTION_PERIODS[period_choice]
+    income_metric = str(period["income"])
+    return_metric = str(period["return"])
+    short_label = str(period["short_label"])
+    capital_metric = "avg_capital_ytd" if period_choice == YEAR_TO_DATE_MODE else "avg_capital_mtd"
+    changes = manager_attribution_change_summary(
+        attribution_rows,
+        current_snapshot,
+        prior_snapshot,
+        board,
+    )
+    render_manager_attribution_overview(summary, changes, period_choice)
+    render_manager_contribution_ranking(summary, period_choice)
+
+    entity_labels = manager_attribution_entity_labels(summary)
+    entity_options = summary["attribution_entity_id"].astype(str).tolist()
+    state_suffix = "fixed" if board == ATTRIBUTION_BOARD_FIXED else "equity"
+    primary_key = f"manager-attribution-primary-{state_suffix}"
+    comparison_key = f"manager-attribution-comparisons-{state_suffix}"
+    context_key = f"_{primary_key}-context"
+    context = (current_snapshot, period_choice)
+
+    income_values = pd.to_numeric(summary[income_metric], errors="coerce")
+    if income_values.notna().any():
+        default_primary = str(
+            summary.loc[income_values.abs().idxmax(), "attribution_entity_id"]
+        )
+    else:
+        default_primary = entity_options[0]
+    contributor = _manager_extreme(summary, income_metric, "positive")
+    detractor = _manager_extreme(summary, income_metric, "negative")
+    default_comparison_candidates: list[str] = []
+    for row in [contributor, detractor]:
+        if row is not None:
+            default_comparison_candidates.append(str(row["attribution_entity_id"]))
+    default_comparison_candidates.extend(default_manager_entities(summary, limit=5))
+    default_comparisons: list[str] = []
+    for entity_id in default_comparison_candidates:
+        if entity_id == default_primary or entity_id in default_comparisons:
+            continue
+        default_comparisons.append(entity_id)
+        if len(default_comparisons) >= 3:
+            break
+
+    if (
+        st.session_state.get(context_key) != context
+        or st.session_state.get(primary_key) not in entity_labels
+    ):
+        st.session_state[context_key] = context
+        st.session_state[primary_key] = default_primary
+        st.session_state[comparison_key] = default_comparisons
+
+    st.markdown("#### 主体观察与趋势")
+    control_cols = st.columns([0.42, 0.58])
+    with control_cols[0]:
+        primary_entity = st.selectbox(
+            "观察主体",
+            entity_options,
+            key=primary_key,
+            format_func=lambda value: entity_labels.get(value, value),
+            help="默认定位当前归因周期内绝对收益贡献最大的主体。",
+        )
+    comparison_options = [entity_id for entity_id in entity_options if entity_id != primary_entity]
+    valid_comparisons = [
+        entity_id
+        for entity_id in st.session_state.get(comparison_key, default_comparisons)
+        if entity_id in comparison_options
+    ][:MANAGER_ATTRIBUTION_MAX_COMPARISONS]
+    if valid_comparisons != st.session_state.get(comparison_key):
+        st.session_state[comparison_key] = valid_comparisons
+    with control_cols[1]:
+        comparison_entities = st.multiselect(
+            "加入趋势对比",
+            comparison_options,
+            key=comparison_key,
+            max_selections=MANAGER_ATTRIBUTION_MAX_COMPARISONS,
+            format_func=lambda value: entity_labels.get(value, value),
+            help="观察主体始终高亮，可再加入最多 5 个比较主体。",
+        )
+
+    selected_entities = [primary_entity, *comparison_entities]
+    timeseries = manager_attribution_timeseries(
+        attribution_rows,
+        current_snapshot,
+        board,
+        include_interim=include_interim,
+    )
+    if not include_interim:
+        current_status_rows = attribution_rows.loc[
+            attribution_rows["snapshot_date"].astype(str).eq(current_snapshot),
+            "snapshot_status",
+        ]
+        current_status = str(current_status_rows.iloc[0]) if not current_status_rows.empty else ""
+        if current_status == SNAPSHOT_STATUS_INTERIM:
+            st.info(
+                f"当前详情使用 {current_snapshot} 临时中间版；趋势暂不包含临时时点，"
+                f"截止到 {prior_snapshot or '最近月末正式版'}。"
+            )
+    trend_metric, metric_label, value_title, axis_format = manager_attribution_metric_config(
+        period_choice,
+        trend_view,
+    )
+    render_manager_attribution_timeseries_chart(
+        timeseries,
+        selected_entities,
+        entity_labels,
+        primary_entity,
+        trend_metric,
+        metric_label,
+        value_title,
+        axis_format,
+        chart_key=f"manager-attribution-timeseries-{state_suffix}",
+    )
+
+    detail_summary = summary[summary["attribution_entity_id"].eq(primary_entity)].iloc[0]
+    tone = "external" if detail_summary["attribution_scope"] == "委外" else "internal"
+    full_rank = pd.to_numeric(summary[income_metric], errors="coerce").rank(
+        method="min",
+        ascending=False,
+    )
+    detail_index = detail_summary.name
+    rank_value = full_rank.loc[detail_index] if detail_index in full_rank.index else np.nan
+    rank_label = f"#{int(rank_value)} / {int(full_rank.count())}" if pd.notna(rank_value) else "—"
+    change_row = changes[changes["attribution_entity_id"].eq(primary_entity)]
+    estimated_flow = float(change_row["estimated_flow"].iloc[0]) if not change_row.empty else np.nan
+    period_income = float(detail_summary[income_metric])
+    period_return = float(detail_summary[return_metric])
+    st.markdown(f"#### 主体详情｜{entity_labels.get(primary_entity, primary_entity)}")
+    render_kpi_grid(
+        [
+            {"label": "当前市值", "value": amount(float(detail_summary["full_market_value"])), "tone": tone},
+            {
+                "label": f"{short_label}综合收益",
+                "value": signed_amount(period_income),
+                "tone": "positive" if period_income >= 0 else "negative",
+            },
+            {
+                "label": f"{short_label}综合收益率",
+                "value": pct(period_return),
+                "delta": f"资金占用 {amount(float(detail_summary[capital_metric]))}",
+                "tone": tone,
+            },
+            {"label": "全板块贡献排名", "value": rank_label, "delta": "按综合收益额", "tone": tone},
+            {
+                "label": "估算净配置变化",
+                "value": signed_amount(estimated_flow),
+                "delta": f"较 {prior_snapshot} 月末" if prior_snapshot else "暂无月末基准",
+                "delta_tone": (
+                    "positive"
+                    if np.isfinite(estimated_flow) and estimated_flow >= 0
+                    else "negative"
+                    if np.isfinite(estimated_flow)
+                    else ""
+                ),
+                "tone": (
+                    "positive"
+                    if np.isfinite(estimated_flow) and estimated_flow >= 0
+                    else "negative"
+                    if np.isfinite(estimated_flow)
+                    else tone
+                ),
+            },
+            {"label": "资产数量", "value": f"{int(detail_summary['asset_count']):,}", "tone": tone},
+        ],
+        grid_class="kpi-grid-attribution",
+    )
+    if np.isfinite(period_return) and abs(period_return) > 1.0:
+        st.warning(
+            f"该主体{short_label}收益率为 {pct(period_return)}，受较小资金占用分母或特殊调节项影响；"
+            "横向评价请优先结合收益额、当前市值与资产明细。"
+        )
+
+    asset_detail = manager_asset_detail(
+        attribution_rows,
+        current_snapshot,
+        board,
+        primary_entity,
+    )
+    render_manager_asset_contribution_chart(asset_detail, period_choice)
+    holdings = manager_holding_map(
+        attribution_rows,
+        current_snapshot,
+        board,
+        primary_entity,
+        max_assets=20,
+        prior_snapshot_date=prior_snapshot,
+    )
+    render_manager_holding_treemap(
+        holdings,
+        asset_detail,
+        chart_key=f"manager-attribution-holding-map-{state_suffix}",
+        period_choice=period_choice,
+    )
+    exited_holdings = manager_exited_holdings(
+        attribution_rows,
+        current_snapshot,
+        board,
+        primary_entity,
+        prior_snapshot_date=prior_snapshot,
+    )
+    render_manager_exited_holdings(
+        exited_holdings,
+        prior_snapshot,
+        table_key=f"manager-attribution-exited-holdings-{state_suffix}",
+    )
+
+    st.markdown("#### 资产明细")
+    if len(asset_detail) > 500:
+        st.caption(f"资产明细共 {len(asset_detail):,} 条，按当前市值排序展示前 500 条。")
+    detail_metric_columns = (
+        ["comprehensive_income_ytd", "avg_capital_ytd", "comprehensive_return_ytd"]
+        if period_choice == YEAR_TO_DATE_MODE
+        else ["comprehensive_income_mtd", "avg_capital_mtd", "comprehensive_return_mtd"]
+    )
+    st.dataframe(
+        format_table(
+            asset_detail.head(500)[
+                [
+                    "asset_name",
+                    "asset_class",
+                    "account_bucket",
+                    "full_market_value",
+                    *detail_metric_columns,
+                    "asset_code",
+                    "trade_code",
+                    "source_rows",
+                ]
+            ],
+            comparison_mode=period_choice,
+        ),
+        width="stretch",
+        hide_index=True,
+        key=f"manager-attribution-assets-{state_suffix}",
+    )
+
+
+def render_manager_attribution_dashboard(data: pd.DataFrame, current_snapshot: str) -> None:
+    attribution_rows = build_manager_attribution_rows(data)
+    prior_candidates = previous_official_snapshots(data, current_snapshot)
+    prior_snapshot = prior_candidates[-1] if prior_candidates else ""
+    show_block_note(
+        "先用全体贡献/拖累定位重点，再选择一个观察主体查看趋势、资产收益归因与持仓规模结构；"
+        "本模块仅跟随数据时点，归因周期在下方独立切换。"
+    )
+    control_cols = st.columns([0.34, 0.34, 0.32])
+    with control_cols[0]:
+        period_choice = st.radio(
+            "归因周期",
+            [YEAR_TO_DATE_MODE, MONTH_REVIEW_MODE],
+            horizontal=True,
+            key="manager-attribution-period",
+        )
+    with control_cols[1]:
+        trend_view = st.radio(
+            "趋势指标",
+            MANAGER_ATTRIBUTION_VIEW_OPTIONS,
+            horizontal=True,
+            key="manager-attribution-trend-view",
+        )
+    with control_cols[2]:
+        include_interim = st.toggle(
+            "趋势包含临时时点",
+            value=False,
+            key="manager-attribution-include-interim",
+        )
+    coverage = manager_attribution_coverage_summary(attribution_rows, current_snapshot)
+    render_manager_attribution_coverage(coverage, current_snapshot)
+    fixed_tab, equity_tab = st.tabs(["固收归因", "权益归因"])
+    with fixed_tab:
+        render_manager_attribution_tab(
+            attribution_rows,
+            current_snapshot,
+            prior_snapshot,
+            ATTRIBUTION_BOARD_FIXED,
+            period_choice,
+            trend_view,
+            include_interim,
+        )
+    with equity_tab:
+        render_manager_attribution_tab(
+            attribution_rows,
+            current_snapshot,
+            prior_snapshot,
+            ATTRIBUTION_BOARD_EQUITY,
+            period_choice,
+            trend_view,
+            include_interim,
+        )
+
+
 def main() -> None:
     apply_columbia_theme()
     if maintenance_mode_enabled():
@@ -3128,7 +4368,7 @@ def main() -> None:
 
     render_hero_banner(
         "组合管理账户复盘",
-        "看组合规模、收益贡献、数据质量，并追到资产证据。",
+        "看组合规模、收益贡献、数据质量，并追到资产明细。",
         kicker="Columbia / Portfolio Review",
     )
 
@@ -3179,9 +4419,6 @@ def main() -> None:
 
     if st.session_state.get("reset_filters"):
         st.session_state["账户"] = ALL
-        st.session_state["投资品种"] = ALL
-        st.session_state["投资经理"] = ALL
-        st.session_state["加载全部资产证据"] = False
         st.session_state["加载全部委外权益明细"] = False
         st.session_state["reset_filters"] = False
 
@@ -3223,7 +4460,7 @@ def main() -> None:
         else:
             prior_month = prior_candidates[-1] if prior_candidates else ""
             st.caption("年初以来口径使用源表年初市值、本年以来收益、本年以来平均资金占用。")
-        if st.button("重置局部筛选"):
+        if st.button("重置账户筛选"):
             st.session_state["reset_filters"] = True
             st.rerun()
 
@@ -3243,32 +4480,11 @@ def main() -> None:
         st.session_state["账户"] = ALL
     selected_account = st.session_state.get("账户", ALL)
 
-    current_options_slice = snapshot_slice(data, current_month)
-    account_filtered_options = current_options_slice
-    if selected_account != ALL:
-        account_filtered_options = account_filtered_options[account_filtered_options["account_bucket"] == selected_account]
-    asset_options = [ALL] + sorted(account_filtered_options["asset_class"].dropna().astype(str).unique().tolist())
-    if st.session_state.get("投资品种") not in asset_options:
-        st.session_state["投资品种"] = ALL
-    selected_asset_class = st.session_state.get("投资品种", ALL)
-
-    manager_options_frame = account_filtered_options
-    if selected_asset_class != ALL:
-        manager_options_frame = manager_options_frame[manager_options_frame["asset_class"] == selected_asset_class]
-    manager_options = [ALL] + sorted(
-        manager_options_frame[MANAGER_DISPLAY_COLUMN].dropna().astype(str).unique().tolist()
-    )
-    if st.session_state.get("投资经理") not in manager_options:
-        st.session_state["投资经理"] = ALL
-    selected_manager = st.session_state.get("投资经理", ALL)
-
     render_filter_pills(
         current_month,
         comparison_mode,
         prior_month,
         selected_account,
-        selected_asset_class,
-        selected_manager,
     )
 
     current_slice = snapshot_slice(data, current_month)
@@ -3425,7 +4641,7 @@ def main() -> None:
     section_anchor("equity-dashboard")
     st.subheader("股票专项看板：委内/委外权益收益对比")
     show_block_note(
-        "本模块只跟随数据时点和分析视角，不受账户、投资品种或投资经理/受托机构筛选影响；"
+        "本模块只跟随数据时点和分析视角，不受下方账户筛选影响；"
         "委内固定展示股票、四类权益产品合计和鲍淼配置盘 OCI 股票，长股投股票不纳入；"
         "委外按公司汇总全部权益资产并排除现金、固收、应收和费用项目；"
         "无持仓公司保留零值，平均资金占用不足时收益率显示为 —。"
@@ -3446,6 +4662,12 @@ def main() -> None:
         "卡片胶囊数字为综合收益率。"
     )
     render_strategy_book_overview(data, current_month, prior_month, comparison_mode)
+
+    st.divider()
+
+    section_anchor("manager-attribution")
+    st.subheader("投资经理 / 受托方归因")
+    render_manager_attribution_dashboard(data, current_month)
 
     st.divider()
 
@@ -3617,182 +4839,6 @@ def main() -> None:
                     "avg_capital_mtd_current",
                     "comprehensive_return_mtd",
                     "record_count_current",
-                ]
-            ],
-            comparison_mode=comparison_mode,
-        ),
-        width="stretch",
-        hide_index=True,
-    )
-
-    section_anchor("manager-breakdown")
-    st.subheader("品种内投资经理/受托机构拆解")
-    show_block_note(
-        f"本表用于回答选定品种下，结果由哪些投资经理贡献或拖累；委外记录的源表投资经理为空时，改用已识别的受托机构标注。筛选会同步收窄本表和资产证据，当前采用{comparison_mode}口径。"
-    )
-    if st.session_state.get("经理展示口径") not in ["合并账户", "拆分账户"]:
-        st.session_state["经理展示口径"] = "合并账户"
-    manager_scope_cols = st.columns([0.22, 0.26, 0.26, 0.26])
-    with manager_scope_cols[0]:
-        manager_view_mode = st.radio(
-            "经理展示口径",
-            ["合并账户", "拆分账户"],
-            horizontal=True,
-            key="经理展示口径",
-        )
-
-    account_filtered_options = current_options_slice
-    if manager_view_mode == "拆分账户" and selected_account != ALL:
-        account_filtered_options = account_filtered_options[account_filtered_options["account_bucket"] == selected_account]
-    asset_options = [ALL] + sorted(account_filtered_options["asset_class"].dropna().astype(str).unique().tolist())
-    if st.session_state.get("投资品种") not in asset_options:
-        st.session_state["投资品种"] = ALL
-    selected_asset_class = st.session_state.get("投资品种", ALL)
-    manager_options_frame = account_filtered_options
-    if selected_asset_class != ALL:
-        manager_options_frame = manager_options_frame[manager_options_frame["asset_class"] == selected_asset_class]
-    manager_options = [ALL] + sorted(
-        manager_options_frame[MANAGER_DISPLAY_COLUMN].dropna().astype(str).unique().tolist()
-    )
-    if st.session_state.get("投资经理") not in manager_options:
-        st.session_state["投资经理"] = ALL
-    with manager_scope_cols[1]:
-        selected_asset_class = st.selectbox("投资品种", asset_options, key="投资品种")
-    manager_options_frame = account_filtered_options
-    if selected_asset_class != ALL:
-        manager_options_frame = manager_options_frame[manager_options_frame["asset_class"] == selected_asset_class]
-    manager_options = [ALL] + sorted(
-        manager_options_frame[MANAGER_DISPLAY_COLUMN].dropna().astype(str).unique().tolist()
-    )
-    if st.session_state.get("投资经理") not in manager_options:
-        st.session_state["投资经理"] = ALL
-    with manager_scope_cols[2]:
-        selected_manager = st.selectbox("投资经理/受托机构", manager_options, key="投资经理")
-    manager_group_cols = (
-        ["asset_class", MANAGER_DISPLAY_COLUMN]
-        if manager_view_mode == "合并账户"
-        else ["account_bucket", "asset_class", MANAGER_DISPLAY_COLUMN]
-    )
-    manager_summary = ensure_summary_columns(
-        comparison_summary(
-            data,
-            current_month,
-            prior_month,
-            manager_group_cols,
-            comparison_mode,
-        ),
-        comparison_mode,
-    )
-    if manager_view_mode == "拆分账户" and selected_account != ALL:
-        manager_summary = manager_summary[manager_summary["account_bucket"] == selected_account]
-    if selected_asset_class != ALL:
-        manager_summary = manager_summary[manager_summary["asset_class"] == selected_asset_class]
-    if selected_manager != ALL:
-        manager_summary = manager_summary[manager_summary[MANAGER_DISPLAY_COLUMN] == selected_manager]
-    manager_display = manager_summary.sort_values("comprehensive_income_mtd_current", ascending=False)
-    manager_display_columns = [
-        "asset_class",
-        MANAGER_DISPLAY_COLUMN,
-        "full_market_value_current",
-        "full_market_value_prior",
-        "full_market_value_delta",
-        "finance_income_mtd_current",
-        "comprehensive_income_mtd_current",
-        "avg_capital_mtd_current",
-        "comprehensive_return_mtd",
-        "record_count_current",
-    ]
-    if manager_view_mode == "拆分账户":
-        manager_display_columns = ["account_bucket"] + manager_display_columns
-    manager_table = manager_display[manager_display_columns].reset_index(drop=True)
-    st.dataframe(
-        format_table(
-            manager_table,
-            comparison_mode=comparison_mode,
-        ),
-        width="stretch",
-        hide_index=True,
-        key=f"manager-breakdown-table-{manager_view_mode}",
-    )
-
-    section_anchor("asset-evidence")
-    st.subheader("资产证据")
-    evidence_account = selected_account if manager_view_mode == "拆分账户" else ALL
-    if comparison_mode == YEAR_TO_DATE_MODE:
-        show_block_note(
-            "本表用于把账户、品种、经理的结果追溯到资产明细；变化类型基于源表年初市值与当前市值判断，不等同于逐月交易明细。"
-        )
-        evidence = asset_evidence_year_open(
-            data,
-            current_month,
-            evidence_account,
-            selected_asset_class,
-            selected_manager,
-            prior_month=prior_month,
-        )
-        evidence_options = asset_evidence_sort_options(comparison_mode)
-    else:
-        if comparison_mode == SNAPSHOT_COMPARISON_MODE:
-            show_block_note(
-                f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按当前数据时点和选定对比时点 {snapshot_display_label(prior_month)} 是否出现及市值变化判断。"
-            )
-        else:
-            show_block_note(
-                f"本表用于把账户、品种、经理的结果追溯到资产明细；变化类型按当前数据时点和上一月正式快照 {snapshot_display_label(prior_month)} 是否出现及市值变化判断。"
-            )
-        evidence = asset_evidence(
-            data,
-            current_month,
-            prior_month,
-            evidence_account,
-            selected_asset_class,
-            selected_manager,
-        )
-        evidence_options = asset_evidence_sort_options(comparison_mode)
-    sort_choice = st.radio(
-        "资产证据视角",
-        evidence_options,
-        horizontal=True,
-    )
-    evidence = sort_asset_evidence(evidence, sort_choice, comparison_mode)
-    show_all_evidence = False
-    if len(evidence) > 500:
-        show_all_key = "加载全部资产证据"
-        reset_boolean_state_on_context(
-            show_all_key,
-            (
-                current_month,
-                prior_month,
-                comparison_mode,
-                manager_view_mode,
-                evidence_account,
-                selected_asset_class,
-                selected_manager,
-                sort_choice,
-            ),
-        )
-        show_all_evidence = st.toggle(
-            f"加载全部资产证据（{len(evidence):,} 条）",
-            key=show_all_key,
-        )
-        if not show_all_evidence:
-            st.caption("为提升刷新速度，默认展示当前排序下前 500 条；汇总指标仍按全部资产计算。")
-    display_evidence = evidence if show_all_evidence else evidence.head(500)
-
-    st.dataframe(
-        format_table(
-            display_evidence[
-                [
-                    "change_type",
-                    "asset_name",
-                    MANAGER_DISPLAY_COLUMN,
-                    *asset_evidence_value_columns(comparison_mode),
-                    "asset_code",
-                    "trade_code",
-                    "account_bucket",
-                    "asset_class",
-                    "source_rows_current",
-                    "source_rows_prior",
                 ]
             ],
             comparison_mode=comparison_mode,
