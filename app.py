@@ -3255,6 +3255,11 @@ def manager_attribution_metric_config(
     return metric, f"{short_label}综合收益额", f"{short_label}综合收益额(亿)", ",.1f"
 
 
+def manager_attribution_period_for_mode(comparison_mode: str) -> str:
+    """Map the global sidebar time view to the manager attribution metric period."""
+    return YEAR_TO_DATE_MODE if comparison_mode == YEAR_TO_DATE_MODE else MONTH_REVIEW_MODE
+
+
 def _manager_extreme(
     frame: pd.DataFrame,
     metric: str,
@@ -3364,6 +3369,16 @@ def render_manager_attribution_overview(
     total_income = float(income_values.sum())
     positive_count = int((income_values > CHART_EPSILON).sum())
     negative_count = int((income_values < -CHART_EPSILON).sum())
+    current_market_delta = np.nan
+    if not changes.empty and "full_market_value_delta" in changes.columns:
+        current_market_delta = float(
+            pd.to_numeric(changes["full_market_value_delta"], errors="coerce")
+            .fillna(0.0)
+            .sum()
+        )
+    market_card_delta = f"{len(summary):,} 个主体"
+    if np.isfinite(current_market_delta):
+        market_card_delta += f" · 较基准 {signed_amount(current_market_delta)}"
 
     def extreme_card(
         row: pd.Series | None,
@@ -3391,7 +3406,7 @@ def render_manager_attribution_overview(
         {
             "label": "当前归因市值",
             "value": amount(float(summary["full_market_value"].sum())),
-            "delta": f"{len(summary):,} 个主体",
+            "delta": market_card_delta,
         },
         {
             "label": f"{short_label}综合收益",
@@ -3441,20 +3456,36 @@ def render_manager_attribution_overview(
 def render_manager_contribution_ranking(
     summary: pd.DataFrame,
     period_choice: str,
+    view_choice: str = "综合收益额",
+    title_prefix: str = "",
 ) -> None:
     period = MANAGER_ATTRIBUTION_PERIODS[period_choice]
     income_metric = str(period["income"])
     return_metric = str(period["return"])
     short_label = str(period["short_label"])
+    metric, metric_label, value_title, axis_format = manager_attribution_metric_config(
+        period_choice,
+        view_choice,
+    )
+    is_return_view = view_choice == "综合收益率"
+    metric_text = "综合收益率" if is_return_view else "综合收益额"
+    secondary_metric = income_metric if is_return_view else return_metric
+    secondary_title = (
+        f"{short_label}综合收益额(亿)"
+        if is_return_view
+        else f"{short_label}综合收益率"
+    )
+    secondary_format = ",.2f" if is_return_view else ".2%"
     chart_data = summary.copy()
-    chart_data[income_metric] = pd.to_numeric(chart_data[income_metric], errors="coerce")
-    chart_data = chart_data.dropna(subset=[income_metric]).reset_index(drop=True)
-    st.markdown(f"#### {short_label}贡献 / 拖累全景")
+    chart_data[metric] = pd.to_numeric(chart_data[metric], errors="coerce")
+    chart_data = chart_data.dropna(subset=[metric]).reset_index(drop=True)
+    st.markdown(f"#### {title_prefix}{short_label}{metric_text}贡献 / 拖累全景")
     if chart_data.empty:
-        st.info("当前口径暂无非零收益贡献可供展示。")
+        st.info(f"当前口径暂无可供展示的{metric_text}贡献。")
         return
 
     chart_data = chart_data.copy()
+    chart_data[income_metric] = pd.to_numeric(chart_data[income_metric], errors="coerce")
     chart_data[return_metric] = pd.to_numeric(chart_data[return_metric], errors="coerce")
     chart_data["full_market_value"] = pd.to_numeric(
         chart_data["full_market_value"], errors="coerce"
@@ -3464,10 +3495,12 @@ def render_manager_contribution_ranking(
         + " · "
         + chart_data["attribution_scope"].astype(str)
     )
-    chart_data["_value"] = pd.to_numeric(chart_data[income_metric], errors="coerce")
-    chart_data["_value_label"] = chart_data["_value"].map(lambda value: f"{value:+,.2f}")
+    chart_data["_value"] = pd.to_numeric(chart_data[metric], errors="coerce")
+    chart_data["_value_label"] = chart_data["_value"].map(
+        lambda value: f"{value:+.2%}" if is_return_view else f"{value:+,.2f}"
+    )
     chart_data["_direction"] = np.where(chart_data["_value"] >= 0, "贡献", "拖累")
-    full_ranks = pd.to_numeric(summary[income_metric], errors="coerce").rank(
+    full_ranks = pd.to_numeric(summary[metric], errors="coerce").rank(
         method="min",
         ascending=False,
     )
@@ -3493,14 +3526,14 @@ def render_manager_contribution_ranking(
     )
     x_encoding = alt.X(
         "_value:Q",
-        title=f"{short_label}综合收益额(亿)",
+        title=value_title,
         scale=alt.Scale(domain=domain),
-        axis=alt.Axis(format=",.1f"),
+        axis=alt.Axis(format=axis_format),
     )
     tooltips = [
         alt.Tooltip("_entity_label:N", title="归因主体"),
-        alt.Tooltip("_value:Q", title=f"{short_label}综合收益额(亿)", format=",.2f"),
-        alt.Tooltip(f"{return_metric}:Q", title=f"{short_label}综合收益率", format=".2%"),
+        alt.Tooltip("_value:Q", title=value_title, format=",.2f" if not is_return_view else ".2%"),
+        alt.Tooltip(secondary_metric + ":Q", title=secondary_title, format=secondary_format),
         alt.Tooltip("full_market_value:Q", title="当前市值(亿)", format=",.2f"),
         alt.Tooltip("_rank_label:N", title="全板块排名"),
     ]
@@ -3544,8 +3577,172 @@ def render_manager_contribution_ranking(
     st.altair_chart(chart, width="stretch")
     st.caption(
         f"已展示 {len(chart_data)} / {len(summary)} 个主体（含零收益主体）；"
-        f"条形长度代表收益额，绿色为贡献、红色为拖累，排名基于全部{len(summary)}个主体。"
+        f"{title_prefix}条形长度代表{metric_text}，绿色为贡献、红色为拖累，排名基于全部{len(summary)}个主体。"
     )
+
+
+def render_manager_comparison_ranking(
+    changes: pd.DataFrame,
+    current_snapshot: str,
+    prior_snapshot: str,
+) -> None:
+    """Show the manager-level scale change against the selected snapshot."""
+    required = {
+        "attribution_entity_name",
+        "attribution_scope",
+        "current_full_market_value",
+        "prior_full_market_value",
+        "full_market_value_delta",
+        "estimated_flow",
+    }
+    if changes.empty or not prior_snapshot or not required.issubset(changes.columns):
+        return
+
+    chart_data = changes.copy()
+    for column in required - {"attribution_entity_name", "attribution_scope"}:
+        chart_data[column] = pd.to_numeric(chart_data[column], errors="coerce")
+    chart_data = chart_data.dropna(subset=["full_market_value_delta"]).reset_index(drop=True)
+    if chart_data.empty:
+        return
+    chart_data["_entity_label"] = (
+        chart_data["attribution_entity_name"].astype(str)
+        + " · "
+        + chart_data["attribution_scope"].astype(str)
+    )
+    chart_data["_value"] = chart_data["full_market_value_delta"]
+    chart_data["_value_label"] = chart_data["_value"].map(lambda value: f"{value:+,.2f}")
+    chart_data["_direction"] = np.where(chart_data["_value"] >= 0, "增加", "减少")
+    value_span = max(
+        float(chart_data["_value"].max() - chart_data["_value"].min()),
+        float(chart_data["_value"].abs().max()),
+        1.0,
+    )
+    domain = [
+        min(float(chart_data["_value"].min()), 0.0) - value_span * 0.12,
+        max(float(chart_data["_value"].max()), 0.0) + value_span * 0.12,
+    ]
+    y_encoding = alt.Y(
+        "_entity_label:N",
+        title=None,
+        sort=alt.SortField(field="_value", order="descending"),
+        axis=alt.Axis(labelLimit=250),
+    )
+    x_encoding = alt.X(
+        "_value:Q",
+        title="较对比时点市值变化(亿)",
+        scale=alt.Scale(domain=domain),
+        axis=alt.Axis(format=",.1f"),
+    )
+    bars = (
+        alt.Chart(chart_data)
+        .mark_bar(cornerRadiusEnd=3)
+        .encode(
+            x=x_encoding,
+            y=y_encoding,
+            color=alt.Color(
+                "_direction:N",
+                title=None,
+                scale=alt.Scale(
+                    domain=["增加", "减少"],
+                    range=["#2F7A6B", NEGATIVE_COLOR],
+                ),
+                legend=None,
+            ),
+            tooltip=[
+                alt.Tooltip("_entity_label:N", title="归因主体"),
+                alt.Tooltip("_value:Q", title="较对比时点市值变化(亿)", format=",.2f"),
+                alt.Tooltip("current_full_market_value:Q", title="当前市值(亿)", format=",.2f"),
+                alt.Tooltip("prior_full_market_value:Q", title="对比时点市值(亿)", format=",.2f"),
+                alt.Tooltip("estimated_flow:Q", title="估算净配置变化(亿)", format=",.2f"),
+            ],
+        )
+    )
+    zero_rule = alt.Chart(pd.DataFrame({"x": [0.0]})).mark_rule(
+        color="#64748B",
+        opacity=0.65,
+    ).encode(x="x:Q")
+    positive_labels = (
+        alt.Chart(chart_data[chart_data["_value"] >= 0])
+        .mark_text(align="left", baseline="middle", dx=7, fontSize=11, fontWeight=600)
+        .encode(x=x_encoding, y=y_encoding, text="_value_label:N")
+    )
+    negative_labels = (
+        alt.Chart(chart_data[chart_data["_value"] < 0])
+        .mark_text(align="right", baseline="middle", dx=-7, fontSize=11, fontWeight=600)
+        .encode(x=x_encoding, y=y_encoding, text="_value_label:N")
+    )
+    chart = (
+        (bars + zero_rule + positive_labels + negative_labels)
+        .properties(height=max(320, len(chart_data) * 26))
+        .configure_view(strokeWidth=0)
+    )
+    st.markdown("#### 较对比时点市值变化全景")
+    st.altair_chart(chart, width="stretch")
+    st.caption(
+        f"当前时点 {snapshot_display_label(current_snapshot)} 对比 "
+        f"{snapshot_display_label(prior_snapshot)}；绿色为市值增加，红色为市值减少。"
+    )
+
+
+def render_manager_comparison_table(
+    changes: pd.DataFrame,
+    current_snapshot: str,
+    prior_snapshot: str,
+    table_key: str,
+) -> None:
+    """Show the manager-level current-vs-baseline values for snapshot comparison."""
+    if changes.empty or not prior_snapshot:
+        return
+
+    working = changes.copy()
+    required = {
+        "attribution_entity_name",
+        "attribution_scope",
+        "current_full_market_value",
+        "prior_full_market_value",
+        "full_market_value_delta",
+        "estimated_flow",
+    }
+    if not required.issubset(working.columns):
+        return
+    for column in required - {"attribution_entity_name", "attribution_scope"}:
+        working[column] = pd.to_numeric(working[column], errors="coerce")
+    working["_abs_delta"] = working["full_market_value_delta"].abs()
+    working = working.sort_values("_abs_delta", ascending=False).drop(columns="_abs_delta")
+    display = working.rename(
+        columns={
+            "attribution_entity_name": "投资经理/受托机构",
+            "attribution_scope": "委内/委外",
+            "current_full_market_value": "当前市值(亿)",
+            "prior_full_market_value": "对比时点市值(亿)",
+            "full_market_value_delta": "较对比时点变化(亿)",
+            "estimated_flow": "估算净配置变化(亿)",
+        }
+    )[
+        [
+            "投资经理/受托机构",
+            "委内/委外",
+            "当前市值(亿)",
+            "对比时点市值(亿)",
+            "较对比时点变化(亿)",
+            "估算净配置变化(亿)",
+        ]
+    ]
+    styled = display.style.format(
+        {
+            "当前市值(亿)": "{:,.2f}",
+            "对比时点市值(亿)": "{:,.2f}",
+            "较对比时点变化(亿)": "{:+,.2f}",
+            "估算净配置变化(亿)": "{:+,.2f}",
+        },
+        na_rep="—",
+    )
+    st.markdown("#### 较对比数据时点变化")
+    st.caption(
+        f"当前时点 {snapshot_display_label(current_snapshot)} 对比 "
+        f"{snapshot_display_label(prior_snapshot)}；按市值变化排序，估算净配置变化已扣除当前时点本月综合收益。"
+    )
+    st.dataframe(styled, width="stretch", hide_index=True, key=table_key)
 
 
 def render_manager_asset_contribution_chart(
@@ -4062,6 +4259,7 @@ def render_manager_attribution_tab(
     period_choice: str,
     trend_view: str,
     include_interim: bool,
+    comparison_mode: str = MONTH_REVIEW_MODE,
 ) -> None:
     summary = manager_attribution_summary(attribution_rows, current_snapshot, board)
     if summary.empty:
@@ -4080,7 +4278,20 @@ def render_manager_attribution_tab(
         board,
     )
     render_manager_attribution_overview(summary, changes, period_choice)
-    render_manager_contribution_ranking(summary, period_choice)
+    if comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        st.caption(
+            "时点对比模式下，全景图按当前时点相对对比时点的市值变化展示；收益额/率选择继续用于下方主体趋势与资产详情。"
+        )
+        render_manager_comparison_ranking(changes, current_snapshot, prior_snapshot)
+    else:
+        render_manager_contribution_ranking(summary, period_choice, trend_view)
+    if comparison_mode == SNAPSHOT_COMPARISON_MODE:
+        render_manager_comparison_table(
+            changes,
+            current_snapshot,
+            prior_snapshot,
+            table_key=f"manager-attribution-comparison-{board}",
+        )
 
     entity_labels = manager_attribution_entity_labels(summary)
     entity_options = summary["attribution_entity_id"].astype(str).tolist()
@@ -4128,7 +4339,7 @@ def render_manager_attribution_tab(
             entity_options,
             key=primary_key,
             format_func=lambda value: entity_labels.get(value, value),
-            help="默认定位当前归因周期内绝对收益贡献最大的主体。",
+            help="默认定位当前左侧时间视角内绝对收益贡献最大的主体。",
         )
     comparison_options = [entity_id for entity_id in entity_options if entity_id != primary_entity]
     valid_comparisons = [
@@ -4304,30 +4515,48 @@ def render_manager_attribution_tab(
     )
 
 
-def render_manager_attribution_dashboard(data: pd.DataFrame, current_snapshot: str) -> None:
+def render_manager_attribution_dashboard(
+    data: pd.DataFrame,
+    current_snapshot: str,
+    comparison_mode: str = MONTH_REVIEW_MODE,
+    baseline_snapshot: str | None = None,
+) -> None:
     attribution_rows = build_manager_attribution_rows(data)
-    prior_candidates = previous_official_snapshots(data, current_snapshot)
-    prior_snapshot = prior_candidates[-1] if prior_candidates else ""
+    if baseline_snapshot is None:
+        prior_candidates = previous_official_snapshots(data, current_snapshot)
+        prior_snapshot = prior_candidates[-1] if prior_candidates else ""
+    else:
+        prior_snapshot = str(baseline_snapshot)
+    if comparison_mode == SNAPSHOT_COMPARISON_MODE and prior_snapshot:
+        baseline_note = (
+            f"规模、配置变化和资产明细以当前时点 {snapshot_display_label(current_snapshot)} "
+            f"对比 {snapshot_display_label(prior_snapshot)}；收益指标跟随左侧时点视角，使用当前时点本月口径。"
+        )
+    elif comparison_mode == YEAR_TO_DATE_MODE:
+        baseline_note = (
+            f"规模、配置变化和资产明细沿用 "
+            f"{snapshot_display_label(prior_snapshot) if prior_snapshot else '上一正式时点'} "
+            "作为变化基准；收益指标跟随左侧年初以来视角。"
+        )
+    else:
+        baseline_note = (
+            f"规模、配置变化和资产明细以 {snapshot_display_label(prior_snapshot) if prior_snapshot else '上一正式时点'} "
+            "为基准；收益指标跟随左侧单月复盘视角。"
+        )
     show_block_note(
         "先用全体贡献/拖累定位重点，再选择一个观察主体查看趋势、资产收益归因与持仓规模结构；"
-        "本模块仅跟随数据时点，归因周期在下方独立切换。"
+        f"本模块跟随左侧分析视角，{baseline_note}"
     )
-    control_cols = st.columns([0.34, 0.34, 0.32])
+    period_choice = manager_attribution_period_for_mode(comparison_mode)
+    control_cols = st.columns([0.55, 0.45])
     with control_cols[0]:
-        period_choice = st.radio(
-            "归因周期",
-            [YEAR_TO_DATE_MODE, MONTH_REVIEW_MODE],
-            horizontal=True,
-            key="manager-attribution-period",
-        )
-    with control_cols[1]:
         trend_view = st.radio(
-            "趋势指标",
+            "趋势 / 全景指标",
             MANAGER_ATTRIBUTION_VIEW_OPTIONS,
             horizontal=True,
             key="manager-attribution-trend-view",
         )
-    with control_cols[2]:
+    with control_cols[1]:
         include_interim = st.toggle(
             "趋势包含临时时点",
             value=False,
@@ -4345,6 +4574,7 @@ def render_manager_attribution_dashboard(data: pd.DataFrame, current_snapshot: s
             period_choice,
             trend_view,
             include_interim,
+            comparison_mode,
         )
     with equity_tab:
         render_manager_attribution_tab(
@@ -4355,6 +4585,7 @@ def render_manager_attribution_dashboard(data: pd.DataFrame, current_snapshot: s
             period_choice,
             trend_view,
             include_interim,
+            comparison_mode,
         )
 
 
@@ -4667,7 +4898,7 @@ def main() -> None:
 
     section_anchor("manager-attribution")
     st.subheader("投资经理 / 受托方归因")
-    render_manager_attribution_dashboard(data, current_month)
+    render_manager_attribution_dashboard(data, current_month, comparison_mode, prior_month)
 
     st.divider()
 
