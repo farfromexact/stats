@@ -9,6 +9,10 @@ test_tmp/
 ~$*.xlsx
 .streamlit_boot_log.txt
 output/
+# One-off manager P&L artifacts.
+scripts/build_manager_pnl_pdf.py
+tests/test_manager_pnl_pdf.py
+output/pdf/zhangjin_stock_pnl_*.pdf
 data/monthly_snapshots/source_cache_extracts/
 data/monthly_snapshots/*.xlsx
 /docs/
