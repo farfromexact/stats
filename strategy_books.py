@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from outsourced_funding import adjust_outsourced_funding_capital
+
 
 INTERNAL_MANDATE = "委托资管"
 RETURN_BASE_THRESHOLD = 0.0001
@@ -519,7 +521,7 @@ def _metric_columns(comparison_mode: str) -> tuple[str, str, str]:
 def _current_strategy_slice(data: pd.DataFrame, current_month: str) -> pd.DataFrame:
     snapshot_key = "snapshot_date" if "snapshot_date" in data.columns else "snapshot_month"
     working = data[data[snapshot_key] == current_month].copy()
-    return ensure_strategy_book_columns(working)
+    return adjust_outsourced_funding_capital(ensure_strategy_book_columns(working))
 
 
 def _aggregate_current(frame: pd.DataFrame, group_cols: list[str], comparison_mode: str) -> pd.DataFrame:

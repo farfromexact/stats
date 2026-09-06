@@ -5,6 +5,8 @@ import re
 import numpy as np
 import pandas as pd
 
+from outsourced_funding import adjust_outsourced_funding_capital
+
 from strategy_books import (
     OUTSOURCED_FIXED_BOOKS,
     OUTSOURCED_FULL_ACCOUNT_BOOKS,
@@ -274,7 +276,7 @@ def build_manager_attribution_rows(data: pd.DataFrame) -> pd.DataFrame:
         working["asset_key"].ne(""),
         working["asset_name"],
     )
-    return working.drop(columns=["_attribution_snapshot_key"])
+    return adjust_outsourced_funding_capital(working.drop(columns=["_attribution_snapshot_key"]))
 
 
 def _ensure_attribution_rows(data: pd.DataFrame) -> pd.DataFrame:

@@ -18,6 +18,8 @@ except ImportError:  # pragma: no cover - compatibility with older Streamlit
 import account_review as account_review_module
 import manager_attribution as manager_attribution_module
 import strategy_books as strategy_books_module
+from manager_position_views import render_position_peer_comparison
+from outsourced_funding import FUNDING_NOTE, adjust_outsourced_funding_capital, funding_capital_audit
 from config import DATA_DIR
 from portfolio_data import (
     SNAPSHOT_STATUS_INTERIM,
@@ -2430,6 +2432,8 @@ def render_outsourced_equity_evidence(
     snapshot_key = "snapshot_date" if "snapshot_date" in data.columns else "snapshot_month"
     relevant_data = data[data[snapshot_key].isin(relevant_snapshots)]
     outsourced_equity = outsourced_equity_holding_slice(relevant_data)
+    if comparison_mode == YEAR_TO_DATE_MODE:
+        outsourced_equity = adjust_outsourced_funding_capital(outsourced_equity)
     if outsourced_equity.empty:
         st.info("当前没有可展示的委外权益持仓。")
         return
@@ -2452,18 +2456,12 @@ def render_outsourced_equity_evidence(
 
     company_options = [ALL] + [f"委外-{label}" for label in EXTERNAL_STRATEGY_BOOK_ORDER]
     equity_type_options = [ALL] + OUTSOURCED_EQUITY_HOLDING_TYPE_ORDER
-    control_cols = st.columns([0.24, 0.22, 0.54])
+    control_cols = st.columns(2)
     with control_cols[0]:
         selected_company = st.selectbox("委外公司", company_options, key="委外权益公司")
     with control_cols[1]:
         selected_equity_type = st.selectbox("权益类型", equity_type_options, key="委外权益类型")
-    with control_cols[2]:
-        sort_choice = st.radio(
-            "委外权益资产证据视角",
-            asset_evidence_sort_options(comparison_mode),
-            horizontal=True,
-            key="委外权益资产证据视角",
-        )
+    sort_choice = ALL
 
     if selected_company != ALL:
         evidence = evidence[evidence["strategy_book_display_label"].eq(selected_company)]
@@ -2528,6 +2526,7 @@ def render_equity_dashboard(
 ) -> None:
     summary = equity_dashboard_summary(data, current_month, comparison_mode)
     if comparison_mode == YEAR_TO_DATE_MODE:
+        st.caption("六家境内权益委外收益率采用放款期平均占用估算，详见下方委内/委外比较中的原值对照。")
         income_title = "年初以来综合收益额"
     elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
         income_title = "当前时点本月综合收益额"
@@ -2574,6 +2573,25 @@ def render_equity_dashboard(
     )
 
 
+def render_outsourced_funding_note(data, snapshot_date):
+    st.caption("六家境内权益委外的YTD收益率已按估算放款期修正平均资金占用，原始YTD收益额不变。")
+    with st.expander("六家权益委外：放款期估算口径与原值对照"):
+        st.caption(FUNDING_NOTE)
+        current = data[data["snapshot_date"].astype(str).eq(str(snapshot_date))]
+        if "attribution_in_scope" not in current:
+            current = build_manager_attribution_rows(current)
+        audit = funding_capital_audit(current, snapshot_date).rename(columns={
+            "strategy_book": "委外账户", "funding_start_estimate": "估算放款日",
+            "source_avg_capital_ytd": "源表YTD平均占用(亿)", "avg_capital_ytd": "放款期平均占用估算(亿)",
+            "comprehensive_income_ytd": "YTD综合收益(亿)", "source_return": "源口径收益率", "funding_return": "修正收益率(估算)",
+        })
+        if not audit.empty:
+            st.dataframe(audit.style.format({
+                "源表YTD平均占用(亿)": "{:.4f}", "放款期平均占用估算(亿)": "{:.4f}",
+                "YTD综合收益(亿)": "{:+.4f}", "源口径收益率": "{:.2%}", "修正收益率(估算)": "{:.2%}",
+            }, na_rep="—"), hide_index=True, width="stretch")
+
+
 def render_strategy_book_overview(
     data: pd.DataFrame,
     current_month: str,
@@ -2582,23 +2600,12 @@ def render_strategy_book_overview(
 ) -> None:
     summary = strategy_book_summary(data, current_month, comparison_mode)
     detail = strategy_book_detail_summary(data, current_month, comparison_mode)
+    if comparison_mode == YEAR_TO_DATE_MODE:
+        render_outsourced_funding_note(data, current_month)
 
     if summary.empty or summary["record_count_current"].sum() == 0:
         st.info("当前没有可展示的委内/委外比较数据。")
         return
-
-    render_kpi_grid(
-        [
-            {
-                "label": str(row["strategy_book_display_label"]),
-                "value": amount(float(row["full_market_value_current"])),
-                "delta": pct(float(row["comprehensive_return_mtd"])),
-                "delta_tone": "positive" if float(row["comprehensive_return_mtd"]) >= 0 else "negative",
-                "tone": "internal" if row["strategy_book_scope"] == "委内" else "external",
-            }
-            for _, row in summary.iterrows()
-        ]
-    )
 
     chart_cols = st.columns(2)
     with chart_cols[0]:
@@ -3496,6 +3503,10 @@ def render_manager_contribution_ranking(
         + chart_data["attribution_scope"].astype(str)
     )
     chart_data["_value"] = pd.to_numeric(chart_data[metric], errors="coerce")
+    chart_data = chart_data.sort_values(
+        ["_value", "_entity_label"], ascending=[False, True], kind="stable"
+    )
+    entity_order = chart_data["_entity_label"].tolist()
     chart_data["_value_label"] = chart_data["_value"].map(
         lambda value: f"{value:+.2%}" if is_return_view else f"{value:+,.2f}"
     )
@@ -3509,25 +3520,32 @@ def render_manager_contribution_ranking(
     chart_data["_rank_label"] = chart_data["_board_rank"].map(
         lambda value: f"第 {int(value)} / {full_ranks.count()} 名" if pd.notna(value) else "无排名"
     )
-    value_span = max(
-        float(chart_data["_value"].max() - chart_data["_value"].min()),
-        float(chart_data["_value"].abs().max()),
-        1.0,
-    )
-    domain = [
-        min(float(chart_data["_value"].min()), 0.0) - value_span * 0.12,
-        max(float(chart_data["_value"].max()), 0.0) + value_span * 0.12,
-    ]
+    # Keep a fixed transition per unit so changing the period does not change
+    # the compression rule. Pad in display space to leave room for end labels.
+    scale_constant = 0.01 if is_return_view else 1.0
+    bounds = np.array([
+        min(float(chart_data["_value"].min()), 0.0),
+        max(float(chart_data["_value"].max()), 0.0),
+    ])
+    display_bounds = np.sign(bounds) * np.log1p(np.abs(bounds) / scale_constant)
+    display_span = max(float(display_bounds[1] - display_bounds[0]), 1.0)
+    padded_bounds = display_bounds + np.array([-0.12, 0.12]) * display_span
+    domain = (
+        np.sign(padded_bounds) * scale_constant * np.expm1(np.abs(padded_bounds))
+    ).tolist()
+    x_scale = alt.Scale(type="symlog", constant=scale_constant, domain=domain)
     y_encoding = alt.Y(
         "_entity_label:N",
         title=None,
-        sort=alt.SortField(field="_value", order="descending"),
+        # All layers share one order, including the positive/negative label subsets.
+        sort=entity_order,
+        scale=alt.Scale(domain=entity_order),
         axis=alt.Axis(labelLimit=250),
     )
     x_encoding = alt.X(
         "_value:Q",
         title=value_title,
-        scale=alt.Scale(domain=domain),
+        scale=x_scale,
         axis=alt.Axis(format=axis_format),
     )
     tooltips = [
@@ -3537,6 +3555,12 @@ def render_manager_contribution_ranking(
         alt.Tooltip("full_market_value:Q", title="当前市值(亿)", format=",.2f"),
         alt.Tooltip("_rank_label:N", title="全板块排名"),
     ]
+    capital_metric = "avg_capital_ytd" if period_choice == YEAR_TO_DATE_MODE else "avg_capital_mtd"
+    if is_return_view and capital_metric in chart_data.columns:
+        tooltips.insert(
+            3,
+            alt.Tooltip(f"{capital_metric}:Q", title=f"{short_label}平均资金占用(亿)", format=",.4f"),
+        )
     bars = (
         alt.Chart(chart_data)
         .mark_bar(cornerRadiusEnd=3)
@@ -3558,7 +3582,7 @@ def render_manager_contribution_ranking(
     zero_rule = alt.Chart(pd.DataFrame({"x": [0.0]})).mark_rule(
         color="#64748B",
         opacity=0.65,
-    ).encode(x="x:Q")
+    ).encode(x=alt.X("x:Q", scale=x_scale))
     positive_labels = (
         alt.Chart(chart_data[chart_data["_value"] >= 0])
         .mark_text(align="left", baseline="middle", dx=7, fontSize=11, fontWeight=600)
@@ -3577,7 +3601,11 @@ def render_manager_contribution_ranking(
     st.altair_chart(chart, width="stretch")
     st.caption(
         f"已展示 {len(chart_data)} / {len(summary)} 个主体（含零收益主体）；"
-        f"{title_prefix}条形长度代表{metric_text}，绿色为贡献、红色为拖累，排名基于全部{len(summary)}个主体。"
+        f"自上而下按{metric_text}从高到低排列，同值按主体名称排序；"
+        "横轴采用对称对数刻度，大值经过压缩，条形长度不代表收益倍数；"
+        "刻度、标签和悬停数字均为实际值。"
+        f"绿色为贡献、红色为拖累，排名基于全部{len(summary)}个主体。"
+        + ("收益率 = 同期综合收益额 / 平均资金占用，较小的分母可能放大比例。" if is_return_view else "")
     )
 
 
@@ -4297,100 +4325,26 @@ def render_manager_attribution_tab(
     entity_options = summary["attribution_entity_id"].astype(str).tolist()
     state_suffix = "fixed" if board == ATTRIBUTION_BOARD_FIXED else "equity"
     primary_key = f"manager-attribution-primary-{state_suffix}"
-    comparison_key = f"manager-attribution-comparisons-{state_suffix}"
-    context_key = f"_{primary_key}-context"
-    context = (current_snapshot, period_choice)
+    render_position_peer_comparison(
+        attribution_rows, current_snapshot, board, include_interim, state_suffix,
+        period="ytd" if period_choice == YEAR_TO_DATE_MODE else "mtd",
+        view_choice=trend_view,
+    )
 
+    st.markdown("#### 单一主体观察")
     income_values = pd.to_numeric(summary[income_metric], errors="coerce")
-    if income_values.notna().any():
-        default_primary = str(
-            summary.loc[income_values.abs().idxmax(), "attribution_entity_id"]
-        )
-    else:
-        default_primary = entity_options[0]
-    contributor = _manager_extreme(summary, income_metric, "positive")
-    detractor = _manager_extreme(summary, income_metric, "negative")
-    default_comparison_candidates: list[str] = []
-    for row in [contributor, detractor]:
-        if row is not None:
-            default_comparison_candidates.append(str(row["attribution_entity_id"]))
-    default_comparison_candidates.extend(default_manager_entities(summary, limit=5))
-    default_comparisons: list[str] = []
-    for entity_id in default_comparison_candidates:
-        if entity_id == default_primary or entity_id in default_comparisons:
-            continue
-        default_comparisons.append(entity_id)
-        if len(default_comparisons) >= 3:
-            break
-
-    if (
-        st.session_state.get(context_key) != context
-        or st.session_state.get(primary_key) not in entity_labels
-    ):
-        st.session_state[context_key] = context
+    default_primary = (
+        str(summary.loc[income_values.abs().idxmax(), "attribution_entity_id"])
+        if income_values.notna().any() else entity_options[0]
+    )
+    if st.session_state.get(primary_key) not in entity_labels:
         st.session_state[primary_key] = default_primary
-        st.session_state[comparison_key] = default_comparisons
-
-    st.markdown("#### 主体观察与趋势")
-    control_cols = st.columns([0.42, 0.58])
-    with control_cols[0]:
-        primary_entity = st.selectbox(
-            "观察主体",
-            entity_options,
-            key=primary_key,
-            format_func=lambda value: entity_labels.get(value, value),
-            help="默认定位当前左侧时间视角内绝对收益贡献最大的主体。",
-        )
-    comparison_options = [entity_id for entity_id in entity_options if entity_id != primary_entity]
-    valid_comparisons = [
-        entity_id
-        for entity_id in st.session_state.get(comparison_key, default_comparisons)
-        if entity_id in comparison_options
-    ][:MANAGER_ATTRIBUTION_MAX_COMPARISONS]
-    if valid_comparisons != st.session_state.get(comparison_key):
-        st.session_state[comparison_key] = valid_comparisons
-    with control_cols[1]:
-        comparison_entities = st.multiselect(
-            "加入趋势对比",
-            comparison_options,
-            key=comparison_key,
-            max_selections=MANAGER_ATTRIBUTION_MAX_COMPARISONS,
-            format_func=lambda value: entity_labels.get(value, value),
-            help="观察主体始终高亮，可再加入最多 5 个比较主体。",
-        )
-
-    selected_entities = [primary_entity, *comparison_entities]
-    timeseries = manager_attribution_timeseries(
-        attribution_rows,
-        current_snapshot,
-        board,
-        include_interim=include_interim,
-    )
-    if not include_interim:
-        current_status_rows = attribution_rows.loc[
-            attribution_rows["snapshot_date"].astype(str).eq(current_snapshot),
-            "snapshot_status",
-        ]
-        current_status = str(current_status_rows.iloc[0]) if not current_status_rows.empty else ""
-        if current_status == SNAPSHOT_STATUS_INTERIM:
-            st.info(
-                f"当前详情使用 {current_snapshot} 临时中间版；趋势暂不包含临时时点，"
-                f"截止到 {prior_snapshot or '最近月末正式版'}。"
-            )
-    trend_metric, metric_label, value_title, axis_format = manager_attribution_metric_config(
-        period_choice,
-        trend_view,
-    )
-    render_manager_attribution_timeseries_chart(
-        timeseries,
-        selected_entities,
-        entity_labels,
-        primary_entity,
-        trend_metric,
-        metric_label,
-        value_title,
-        axis_format,
-        chart_key=f"manager-attribution-timeseries-{state_suffix}",
+    primary_entity = st.selectbox(
+        "选择观察主体",
+        entity_options,
+        key=primary_key,
+        format_func=lambda value: entity_labels.get(value, value),
+        help="仅控制下方主体详情、资产收益贡献、持仓结构与资产明细。",
     )
 
     detail_summary = summary[summary["attribution_entity_id"].eq(primary_entity)].iloc[0]
@@ -4521,7 +4475,16 @@ def render_manager_attribution_dashboard(
     comparison_mode: str = MONTH_REVIEW_MODE,
     baseline_snapshot: str | None = None,
 ) -> None:
+    board = st.radio(
+        "选择归因板块",
+        [ATTRIBUTION_BOARD_FIXED, ATTRIBUTION_BOARD_EQUITY],
+        format_func=lambda value: f"{value}归因",
+        horizontal=True,
+        key="manager-attribution-board",
+    )
     attribution_rows = build_manager_attribution_rows(data)
+    if board == ATTRIBUTION_BOARD_EQUITY and comparison_mode == YEAR_TO_DATE_MODE:
+        render_outsourced_funding_note(attribution_rows, current_snapshot)
     if baseline_snapshot is None:
         prior_candidates = previous_official_snapshots(data, current_snapshot)
         prior_snapshot = prior_candidates[-1] if prior_candidates else ""
@@ -4544,49 +4507,29 @@ def render_manager_attribution_dashboard(
             "为基准；收益指标跟随左侧单月复盘视角。"
         )
     show_block_note(
-        "先用全体贡献/拖累定位重点，再选择一个观察主体查看趋势、资产收益归因与持仓规模结构；"
+        "先看全体贡献/拖累，再按同类分组比较仓位管理；下方单独选择观察主体查看资产收益归因与持仓结构；"
         f"本模块跟随左侧分析视角，{baseline_note}"
     )
     period_choice = manager_attribution_period_for_mode(comparison_mode)
-    control_cols = st.columns([0.55, 0.45])
-    with control_cols[0]:
-        trend_view = st.radio(
-            "趋势 / 全景指标",
-            MANAGER_ATTRIBUTION_VIEW_OPTIONS,
-            horizontal=True,
-            key="manager-attribution-trend-view",
-        )
-    with control_cols[1]:
-        include_interim = st.toggle(
-            "趋势包含临时时点",
-            value=False,
-            key="manager-attribution-include-interim",
-        )
+    trend_view = st.radio(
+        "收益趋势 / 全景指标",
+        MANAGER_ATTRIBUTION_VIEW_OPTIONS,
+        horizontal=True,
+        key="manager-attribution-trend-view",
+    )
+    include_interim = True  # Latest interim is appended automatically to month ends.
     coverage = manager_attribution_coverage_summary(attribution_rows, current_snapshot)
     render_manager_attribution_coverage(coverage, current_snapshot)
-    fixed_tab, equity_tab = st.tabs(["固收归因", "权益归因"])
-    with fixed_tab:
-        render_manager_attribution_tab(
-            attribution_rows,
-            current_snapshot,
-            prior_snapshot,
-            ATTRIBUTION_BOARD_FIXED,
-            period_choice,
-            trend_view,
-            include_interim,
-            comparison_mode,
-        )
-    with equity_tab:
-        render_manager_attribution_tab(
-            attribution_rows,
-            current_snapshot,
-            prior_snapshot,
-            ATTRIBUTION_BOARD_EQUITY,
-            period_choice,
-            trend_view,
-            include_interim,
-            comparison_mode,
-        )
+    render_manager_attribution_tab(
+        attribution_rows,
+        current_snapshot,
+        prior_snapshot,
+        board,
+        period_choice,
+        trend_view,
+        include_interim,
+        comparison_mode,
+    )
 
 
 def main() -> None:
@@ -4890,7 +4833,6 @@ def main() -> None:
         "单一委外计划按数据时点在顶层汇总行与底层持仓中选择有规模的一层，避免重复计算；"
         "指定委外账户按账户全量纳入，包含现金、应收、费用等调节项；"
         "富国顶层产品行只作为对账提示，避免重复计算底层持仓；"
-        "卡片胶囊数字为综合收益率。"
     )
     render_strategy_book_overview(data, current_month, prior_month, comparison_mode)
 
