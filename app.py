@@ -37,6 +37,7 @@ strategy_books_module = importlib.reload(strategy_books_module)
 asset_evidence = account_review_module.asset_evidence
 asset_evidence_year_open = account_review_module.asset_evidence_year_open
 comparison_summary = account_review_module.comparison_summary
+year_open_baseline_snapshot = account_review_module.year_open_baseline_snapshot
 ATTRIBUTION_BOARD_EQUITY = manager_attribution_module.ATTRIBUTION_BOARD_EQUITY
 ATTRIBUTION_BOARD_FIXED = manager_attribution_module.ATTRIBUTION_BOARD_FIXED
 build_manager_attribution_rows = manager_attribution_module.build_manager_attribution_rows
@@ -66,7 +67,7 @@ strategy_book_summary = strategy_books_module.strategy_book_summary
 
 ALL = "全部"
 RETURN_BASE_THRESHOLD = 0.0001
-DATA_SCHEMA_VERSION = "2026-07-31-parquet-only-v5"
+DATA_SCHEMA_VERSION = "2026-09-15-monthly-history-v7"
 YEAR_TO_DATE_MODE = "年初以来"
 MONTH_REVIEW_MODE = "单月复盘"
 SNAPSHOT_COMPARISON_MODE = "时点对比"
@@ -969,6 +970,18 @@ def snapshot_status_map(data: pd.DataFrame) -> dict[str, str]:
         return {}
     metadata = data[["snapshot_date", "snapshot_status"]].drop_duplicates("snapshot_date")
     return dict(zip(metadata["snapshot_date"].astype(str), metadata["snapshot_status"].astype(str)))
+
+
+def snapshot_has_year_open(data: pd.DataFrame, snapshot: str) -> bool:
+    return account_review_module.snapshot_has_year_open(data, snapshot)
+
+
+def comparison_modes_for_snapshot(data: pd.DataFrame, snapshot: str) -> list[str]:
+    return [
+        mode for mode in COMPARISON_MODE_OPTIONS
+        if (mode != YEAR_TO_DATE_MODE or snapshot_has_year_open(data, snapshot) or year_open_baseline_snapshot(data, snapshot))
+        and (mode != MONTH_REVIEW_MODE or previous_official_snapshots(data, snapshot))
+    ]
 
 
 def previous_official_snapshots(data: pd.DataFrame, current_snapshot: str) -> list[str]:
@@ -2130,6 +2143,9 @@ def asset_return_completion_summary(data: pd.DataFrame, current_month: str, plan
 
 
 def render_asset_return_completion(data: pd.DataFrame, current_month: str) -> None:
+    if current_month[:4] != "2026":
+        st.info(f"尚未配置 {current_month[:4]} 年的资产收益计划，暂不展示计划完成情况。")
+        return
     plan, plan_error = load_asset_return_plan(ASSET_RETURN_PLAN_PATH)
     if plan_error:
         st.warning(plan_error)
@@ -2428,7 +2444,8 @@ def render_outsourced_equity_evidence(
         "现金、存款、货币基金、债券、固收基金、应收、费用和轧差项不进入本表。"
     )
 
-    relevant_snapshots = {current_month, prior_month}
+    year_open_snapshot = year_open_baseline_snapshot(data, current_month) if comparison_mode == YEAR_TO_DATE_MODE else ""
+    relevant_snapshots = {current_month, prior_month, year_open_snapshot}
     snapshot_key = "snapshot_date" if "snapshot_date" in data.columns else "snapshot_month"
     relevant_data = data[data[snapshot_key].isin(relevant_snapshots)]
     outsourced_equity = outsourced_equity_holding_slice(relevant_data)
@@ -2445,6 +2462,7 @@ def render_outsourced_equity_evidence(
             current_month,
             extra_group_cols=group_cols,
             prior_month=prior_month,
+            year_open_snapshot=year_open_snapshot,
         )
     else:
         evidence = asset_evidence(
@@ -4603,7 +4621,16 @@ def main() -> None:
             index=snapshots.index(default_current),
             format_func=lambda value: snapshot_display_label(value, status_by_snapshot.get(value)),
         )
-        comparison_mode = st.selectbox("分析视角", COMPARISON_MODE_OPTIONS, index=0, key="分析视角")
+        modes = comparison_modes_for_snapshot(data, current_month)
+        if st.session_state.get("分析视角") not in modes:
+            st.session_state["分析视角"] = modes[0]
+        comparison_mode = st.selectbox("分析视角", modes, key="分析视角")
+        year_open_snapshot = year_open_baseline_snapshot(data, current_month)
+        if not snapshot_has_year_open(data, current_month):
+            if year_open_snapshot:
+                st.caption(f"源表未提供年初市值；年初比较使用 {year_open_snapshot} 月末正式快照作为基准。")
+            else:
+                st.caption("源表未提供年初市值，且缺少上一年末正式快照，暂不提供年初持仓比较。")
         prior_candidates = previous_official_snapshots(data, current_month)
         if comparison_mode == MONTH_REVIEW_MODE and not prior_candidates:
             st.error("缺少上一自然月的月末正式快照，不能做单月复盘规模变化。")
@@ -4633,12 +4660,29 @@ def main() -> None:
             )
         else:
             prior_month = prior_candidates[-1] if prior_candidates else ""
-            st.caption("年初以来口径使用源表年初市值、本年以来收益、本年以来平均资金占用。")
+            if year_open_snapshot:
+                st.caption(
+                    f"年初以来：当前市值对比 {year_open_snapshot} 市值；收益与平均资金占用使用当前源表本年以来累计值。"
+                    "账户或分类覆盖变化也会影响差额。"
+                )
+            else:
+                st.caption("年初以来口径使用源表年初市值、本年以来收益、本年以来平均资金占用。")
         if st.button("重置账户筛选"):
             st.session_state["reset_filters"] = True
             st.rerun()
 
     current_snapshot_status = status_by_snapshot.get(current_month, SNAPSHOT_STATUS_INTERIM)
+    if "source_kind" in data and data["source_kind"].eq("monthly_monitor").any():
+        st.caption(
+            "历史覆盖说明：2024-12 至 2026-02 来自资产配置月度监测，资管公司产品、资管自营等范围"
+            "较后续宽表不完整；跨来源规模变化和历史趋势包含覆盖差异，不能全部解释为资金流入流出。"
+        )
+        comparison_baseline = year_open_snapshot if comparison_mode == YEAR_TO_DATE_MODE else prior_month
+        if comparison_baseline:
+            current_kind = snapshot_slice(data, current_month)["source_kind"].fillna("wide_snapshot").iloc[0]
+            prior_kind = snapshot_slice(data, comparison_baseline)["source_kind"].fillna("wide_snapshot").iloc[0]
+            if current_kind != prior_kind:
+                st.warning("当前与对比时点来自不同范围的源表；规模差额包含数据覆盖变化，请结合账户及委受托明细判断。")
     if current_snapshot_status == SNAPSHOT_STATUS_INTERIM:
         st.warning(
             f"当前展示的是 {snapshot_display_label(current_month, current_snapshot_status)}，并非当月月末正式版本；"
@@ -4665,12 +4709,12 @@ def main() -> None:
     prior_slice = snapshot_slice(data, prior_month)
     current_mv = float(current_slice["full_market_value"].sum())
     if comparison_mode == YEAR_TO_DATE_MODE:
-        prior_mv = float(current_slice["market_value_year_open"].sum())
+        prior_mv = float(account_summary["full_market_value_prior"].sum())
         current_fin = float(current_slice["finance_income_ytd"].sum())
         current_comp = float(current_slice["comprehensive_income_ytd"].sum())
         current_capital = float(current_slice["avg_capital_ytd"].sum())
         period_label = "年初以来截至时点" if current_snapshot_status == SNAPSHOT_STATUS_INTERIM else "年初以来"
-        baseline_label = "年初"
+        baseline_label = f"年初基准（{year_open_snapshot}）" if year_open_snapshot else "年初"
         capital_label = "本年以来平均资金占用"
     elif comparison_mode == SNAPSHOT_COMPARISON_MODE:
         prior_mv = float(prior_slice["full_market_value"].sum())

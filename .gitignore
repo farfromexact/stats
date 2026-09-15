@@ -15,6 +15,7 @@ tests/test_manager_pnl_pdf.py
 output/pdf/zhangjin_stock_pnl_*.pdf
 data/monthly_snapshots/source_cache_extracts/
 data/monthly_snapshots/*.xlsx
+data/1 资产配置月度监测_v2026.xlsx
 /docs/
 /tools/
 /*agent.md

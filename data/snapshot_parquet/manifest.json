@@ -1,7 +1,322 @@
 {
-  "created_at": "2026-09-11T08:29:22.362318+00:00",
+  "created_at": "2026-09-15T03:39:49.073884+00:00",
   "manifest_version": "snapshot-parquet-v3",
   "snapshots": [
+    {
+      "comprehensive_income_mtd": 156.00977303369996,
+      "finance_income_mtd": 4.514473709300001,
+      "full_market_value": 5561.128162971399,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2024-12-31.parquet",
+      "parquet_file_hash": "cfeeb1c9e85e061682f279ae873bfa148199a87e42ef9c4d76e22801944fe7c7",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2024-12-31",
+      "snapshot_month": "2024-12",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 2,
+      "source_row_last": 7770,
+      "source_rows": 7769
+    },
+    {
+      "comprehensive_income_mtd": 21.260438954600005,
+      "finance_income_mtd": 8.363746544000001,
+      "full_market_value": 5701.993601926,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-01-31.parquet",
+      "parquet_file_hash": "92319c9f9e5e6aafa50d8bef65c6f4c6ce40625bbb614fe43998019831ae5a83",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-01-31",
+      "snapshot_month": "2025-01",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 7772,
+      "source_row_last": 14754,
+      "source_rows": 6983
+    },
+    {
+      "comprehensive_income_mtd": -29.558850724600006,
+      "finance_income_mtd": 20.7258325768,
+      "full_market_value": 5833.764753178901,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-02-28.parquet",
+      "parquet_file_hash": "f2045df5270a5465c8217d23e33acadda8d02c8d947a189eadbc569935ae27e4",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-02-28",
+      "snapshot_month": "2025-02",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 14756,
+      "source_row_last": 19794,
+      "source_rows": 5039
+    },
+    {
+      "comprehensive_income_mtd": -39.0384101295,
+      "finance_income_mtd": 8.985205422799998,
+      "full_market_value": 5791.7551542603005,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-03-31.parquet",
+      "parquet_file_hash": "3f750e690d5cc3b158044d559dc2e9d5c9f610ddfab82f8f33fb6d99b608daf7",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-03-31",
+      "snapshot_month": "2025-03",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 19796,
+      "source_row_last": 25220,
+      "source_rows": 5425
+    },
+    {
+      "comprehensive_income_mtd": 103.4258185332,
+      "finance_income_mtd": 6.9635575444999995,
+      "full_market_value": 5932.411219691101,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-04-30.parquet",
+      "parquet_file_hash": "5d6e0b13e95d539177100e9485244fec0e95ee0b58f1584008e54321f6a3d558",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-04-30",
+      "snapshot_month": "2025-04",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 25222,
+      "source_row_last": 30966,
+      "source_rows": 5745
+    },
+    {
+      "comprehensive_income_mtd": 12.453175228300005,
+      "finance_income_mtd": 20.2233354714,
+      "full_market_value": 6002.6643982636,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-05-31.parquet",
+      "parquet_file_hash": "45d3d1ee7ef9b1eaf23f01b5bfb10268c72763b5ce13b7be15c285ae4e5a823f",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-05-31",
+      "snapshot_month": "2025-05",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 30968,
+      "source_row_last": 38551,
+      "source_rows": 7584
+    },
+    {
+      "comprehensive_income_mtd": 80.7608865589,
+      "finance_income_mtd": 34.0753880651,
+      "full_market_value": 6177.77538584,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-06-30.parquet",
+      "parquet_file_hash": "76e347a474f7e435fbf5ccfc24ac26aa91fbda1954c4f629837e1cad1e38f378",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-06-30",
+      "snapshot_month": "2025-06",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 38553,
+      "source_row_last": 46799,
+      "source_rows": 8247
+    },
+    {
+      "comprehensive_income_mtd": 9.445740580900004,
+      "finance_income_mtd": 31.336343455199994,
+      "full_market_value": 6332.1582703986005,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-07-31.parquet",
+      "parquet_file_hash": "8c4b7bd532939e1b3ba039aa61eb8b519d04584a007f7c32d929f41178f12a07",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-07-31",
+      "snapshot_month": "2025-07",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 46801,
+      "source_row_last": 56238,
+      "source_rows": 9438
+    },
+    {
+      "comprehensive_income_mtd": -49.903059041199995,
+      "finance_income_mtd": 34.6054332066,
+      "full_market_value": 6361.8546537109005,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-08-31.parquet",
+      "parquet_file_hash": "089ca88136bf13bbdd97d8dcc535f4fcb5a306c2d2aff45e1aea5664a4304078",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-08-31",
+      "snapshot_month": "2025-08",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 56240,
+      "source_row_last": 66199,
+      "source_rows": 9960
+    },
+    {
+      "comprehensive_income_mtd": -89.82682835300001,
+      "finance_income_mtd": 19.757518844499998,
+      "full_market_value": 6288.6935273803,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-09-30.parquet",
+      "parquet_file_hash": "648aa469d46392e4c7749537b3f491354b5b01e8f5214a4037ab9928ef4b1445",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-09-30",
+      "snapshot_month": "2025-09",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 66201,
+      "source_row_last": 76588,
+      "source_rows": 10388
+    },
+    {
+      "comprehensive_income_mtd": 76.5995038573,
+      "finance_income_mtd": 13.1061637711,
+      "full_market_value": 6364.498699081099,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-10-31.parquet",
+      "parquet_file_hash": "be8c0d4f2c02782e70b9f2eaa5cc4e2446ff1dc0aadd098aa4fdef54446a5ecb",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-10-31",
+      "snapshot_month": "2025-10",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 76590,
+      "source_row_last": 87155,
+      "source_rows": 10566
+    },
+    {
+      "comprehensive_income_mtd": -21.751041522999998,
+      "finance_income_mtd": 2.7892978221999996,
+      "full_market_value": 6348.089104557701,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-11-30.parquet",
+      "parquet_file_hash": "97308d7f2e1f5f4b3898ce666ead1841b6799eb94661e43ff31ac401ca244d49",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-11-30",
+      "snapshot_month": "2025-11",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 87157,
+      "source_row_last": 97966,
+      "source_rows": 10810
+    },
+    {
+      "comprehensive_income_mtd": -28.658288713700003,
+      "finance_income_mtd": 15.0028098352,
+      "full_market_value": 6299.7408032911,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2025-12-31.parquet",
+      "parquet_file_hash": "c419039f2fa0249107d08929b9bdf6d98aaff7a3a11391db2fe1b7b6424d4239",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2025-12-31",
+      "snapshot_month": "2025-12",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 97968,
+      "source_row_last": 109193,
+      "source_rows": 11226
+    },
+    {
+      "comprehensive_income_mtd": 50.8299660493,
+      "finance_income_mtd": 36.552734879300004,
+      "full_market_value": 6635.5758391,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2026-01-31.parquet",
+      "parquet_file_hash": "277ca3a5f4c90e160323076a97572cde3d81db1bca508c73986cddd2b1943419",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2026-01-31",
+      "snapshot_month": "2026-01",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 109195,
+      "source_row_last": 115614,
+      "source_rows": 6420
+    },
+    {
+      "comprehensive_income_mtd": 9.7397630589,
+      "finance_income_mtd": 11.5096798737,
+      "full_market_value": 6841.969564095,
+      "missing_fields": [
+        "market_value_year_open"
+      ],
+      "parquet_file": "2026-02-28.parquet",
+      "parquet_file_hash": "699727fa885e8e1237e9a6bdac5761c672e7f69e13a3d6c549955f4d04c85d2e",
+      "sheet_name": "资产明细表",
+      "snapshot_date": "2026-02-28",
+      "snapshot_month": "2026-02",
+      "snapshot_status": "official",
+      "source_date_column": "A",
+      "source_file_hash": "f877943040046c96b26ffc41548f7f4ac5bf6af7cf82caaa4edeb050831bfb42",
+      "source_file_name": "1 资产配置月度监测_v2026.xlsx",
+      "source_kind": "monthly_monitor",
+      "source_row_first": 115616,
+      "source_row_last": 122557,
+      "source_rows": 6942
+    },
     {
       "comprehensive_income_mtd": -33.3534679235,
       "finance_income_mtd": -13.728544064400001,

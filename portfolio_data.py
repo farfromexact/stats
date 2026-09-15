@@ -152,21 +152,43 @@ def _read_one(path: Path) -> tuple[pd.DataFrame | None, dict]:
         log["message"] = "缺少必需字段：" + "、".join(missing)
         return None, log
 
+    standard = normalize_snapshot_rows(raw, snapshot_date, path.name, log["source_file_hash"])
+    log["source_rows"] = len(standard)
+    log["full_market_value"] = float(standard["full_market_value"].sum())
+    log["finance_income_mtd"] = float(standard["finance_income_mtd"].sum())
+    log["comprehensive_income_mtd"] = float(standard["comprehensive_income_mtd"].sum())
+    return standard, log
+
+
+def normalize_snapshot_rows(
+    raw: pd.DataFrame,
+    snapshot_date: str,
+    source_file_name: str,
+    source_file_hash: str,
+    *,
+    missing_year_open: bool = False,
+) -> pd.DataFrame:
+    """Normalize one dated source partition, retaining its original Excel row numbers."""
     source_columns = REQUIRED_FIELDS + [field for field in OPTIONAL_FIELDS if field in raw.columns]
+    if missing_year_open:
+        raw = raw.copy()
+        raw["年初市值(亿)"] = float("nan")
     standard = raw[source_columns].rename(columns=FIELD_MAP).copy()
     for field in OPTIONAL_FIELDS:
         column = FIELD_MAP[field]
         if column not in standard.columns:
             standard[column] = OPTIONAL_FIELD_DEFAULTS.get(field, "")
     standard.insert(0, "source_row_no", raw.index + 2)
-    standard.insert(0, "source_file_name", path.name)
-    standard.insert(0, "source_file_hash", log["source_file_hash"])
-    standard.insert(0, "snapshot_status", snapshot_status)
-    standard.insert(0, "snapshot_month", snapshot_month)
+    standard.insert(0, "source_file_name", source_file_name)
+    standard.insert(0, "source_file_hash", source_file_hash)
+    standard.insert(0, "snapshot_status", _snapshot_status(snapshot_date))
+    standard.insert(0, "snapshot_month", snapshot_date[:7] if snapshot_date else None)
     standard.insert(0, "snapshot_date", snapshot_date)
 
     for column in NUMERIC_COLUMNS:
         standard[column] = pd.to_numeric(standard[column], errors="coerce").fillna(0.0)
+    if missing_year_open:
+        standard["market_value_year_open"] = float("nan")
 
     standard["account_bucket"] = _clean_label(standard["account_bucket"], "未分账户/待确认")
     standard["asset_class"] = _clean_label(standard["asset_class"], "未分类/待确认")
@@ -194,11 +216,7 @@ def _read_one(path: Path) -> tuple[pd.DataFrame | None, dict]:
         + standard["manager"].fillna("").astype(str).str.strip()
     )
 
-    log["source_rows"] = len(standard)
-    log["full_market_value"] = float(standard["full_market_value"].sum())
-    log["finance_income_mtd"] = float(standard["finance_income_mtd"].sum())
-    log["comprehensive_income_mtd"] = float(standard["comprehensive_income_mtd"].sum())
-    return standard, log
+    return standard
 
 
 def _manifest_entry_to_log(entry: dict) -> dict:
@@ -227,6 +245,14 @@ def _parquet_frame_matches_manifest(frame: pd.DataFrame, entry: dict) -> bool:
         return False
     if not PARQUET_REQUIRED_COLUMNS.issubset(frame.columns):
         return False
+    if entry.get("source_kind") == "monthly_monitor":
+        if "source_kind" not in frame or not frame["source_kind"].eq("monthly_monitor").all():
+            return False
+        if not frame["market_value_year_open"].isna().all():
+            return False
+        row_numbers = pd.to_numeric(frame["source_row_no"], errors="coerce")
+        if row_numbers.isna().any() or (row_numbers < 2).any() or row_numbers.duplicated().any():
+            return False
 
     for column in [
         "snapshot_date",
@@ -269,7 +295,7 @@ def _validated_manifest_entries(manifest: dict) -> list[dict] | None:
         return None
 
     seen_dates: set[str] = set()
-    seen_sources: set[str] = set()
+    seen_sources: set[str | tuple[str, str]] = set()
     seen_parquet_files: set[str] = set()
     validated: list[dict] = []
     for entry in entries:
@@ -285,7 +311,17 @@ def _validated_manifest_entries(manifest: dict) -> list[dict] | None:
             return None
         if parquet_name != f"{snapshot_date}.parquet":
             return None
-        if _snapshot_date(source_name) != snapshot_date:
+        monthly_monitor = entry.get("source_kind") == "monthly_monitor"
+        if monthly_monitor:
+            if (
+                _snapshot_date(snapshot_date.replace("-", "")) != snapshot_date
+                or entry.get("sheet_name") != "资产明细表"
+                or entry.get("source_date_column") != "A"
+                or entry.get("missing_fields") != ["market_value_year_open"]
+                or not source_name.endswith(".xlsx")
+            ):
+                return None
+        elif _snapshot_date(source_name) != snapshot_date:
             return None
         if entry.get("snapshot_month") != snapshot_date[:7]:
             return None
@@ -311,10 +347,11 @@ def _validated_manifest_entries(manifest: dict) -> list[dict] | None:
         if source_rows <= 0 or not all(math.isfinite(value) for value in control_totals):
             return None
 
-        if snapshot_date in seen_dates or source_name in seen_sources or parquet_name in seen_parquet_files:
+        source_identity = (source_name, snapshot_date) if monthly_monitor else source_name
+        if snapshot_date in seen_dates or source_identity in seen_sources or parquet_name in seen_parquet_files:
             return None
         seen_dates.add(snapshot_date)
-        seen_sources.add(source_name)
+        seen_sources.add(source_identity)
         seen_parquet_files.add(parquet_name)
         validated.append(entry)
 

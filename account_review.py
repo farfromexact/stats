@@ -22,6 +22,29 @@ def _snapshot_slice(data: pd.DataFrame, snapshot: str) -> pd.DataFrame:
     return data[data[_snapshot_key_column(data)] == snapshot]
 
 
+def snapshot_has_year_open(data: pd.DataFrame, snapshot: str) -> bool:
+    rows = _snapshot_slice(data, snapshot)
+    return (
+        not rows.empty
+        and "market_value_year_open" in rows
+        and pd.to_numeric(rows["market_value_year_open"], errors="coerce").notna().all()
+    )
+
+
+def year_open_baseline_snapshot(data: pd.DataFrame, snapshot: str) -> str:
+    """Use the previous December 31 only when the source has no complete opening values."""
+    if snapshot_has_year_open(data, snapshot):
+        return ""
+    date = pd.to_datetime(snapshot, errors="coerce")
+    if pd.isna(date):
+        return ""
+    baseline = f"{date.year - 1}-12-31"
+    rows = _snapshot_slice(data, baseline)
+    if rows.empty or ("snapshot_status" in rows and not rows["snapshot_status"].eq("official").all()):
+        return ""
+    return baseline
+
+
 def _manager_column(data: pd.DataFrame) -> str:
     return "manager_display" if "manager_display" in data.columns else "manager"
 
@@ -97,11 +120,21 @@ def current_vs_prior(data: pd.DataFrame, current_month: str, prior_month: str, g
 
 
 def current_vs_year_open(data: pd.DataFrame, current_month: str, group_cols: list[str]) -> pd.DataFrame:
+    missing_open = not snapshot_has_year_open(data, current_month)
+    baseline = year_open_baseline_snapshot(data, current_month) if missing_open else ""
     current = _aggregate(data, current_month, group_cols)
     current = current.rename(columns={f"{metric}": f"{metric}_current" for metric in GROUP_METRICS})
     current = current.rename(columns={"record_count": "record_count_current"})
 
-    current["full_market_value_prior"] = current["market_value_year_open_current"]
+    if baseline:
+        prior = _aggregate(data, baseline, group_cols)[group_cols + ["full_market_value", "record_count"]]
+        prior = prior.rename(columns={"full_market_value": "full_market_value_prior", "record_count": "record_count_prior"})
+        current = current.merge(prior, on=group_cols, how="outer")
+        value_cols = [f"{metric}_current" for metric in GROUP_METRICS if metric != "market_value_year_open"]
+        value_cols += ["record_count_current", "full_market_value_prior", "record_count_prior"]
+        current[value_cols] = current[value_cols].fillna(0.0)
+    else:
+        current["full_market_value_prior"] = current["market_value_year_open_current"]
     current["full_market_value_delta"] = (
         current["full_market_value_current"] - current["full_market_value_prior"]
     )
@@ -126,6 +159,10 @@ def current_vs_year_open(data: pd.DataFrame, current_month: str, group_cols: lis
         current.loc[valid_base, "comprehensive_income_ytd_current"]
         / current.loc[valid_base, "avg_capital_ytd_current"]
     )
+    if missing_open:
+        current["market_value_year_open_current"] = float("nan")
+        if not baseline:
+            current[["full_market_value_prior", "full_market_value_delta", "net_full_market_value_delta"]] = float("nan")
     return current
 
 
@@ -310,7 +347,15 @@ def asset_evidence_year_open(
     manager: str | None = None,
     extra_group_cols: list[str] | None = None,
     prior_month: str | None = None,
+    year_open_snapshot: str | None = None,
 ) -> pd.DataFrame:
+    missing_open = not snapshot_has_year_open(data, current_month)
+    # The caller may resolve the baseline before filtering to a book with no opening holdings.
+    baseline = (year_open_snapshot or year_open_baseline_snapshot(data, current_month)) if missing_open else ""
+    if baseline and baseline != f"{pd.Timestamp(current_month).year - 1}-12-31":
+        raise ValueError("年初基准必须是上一年 12 月 31 日")
+    if missing_open and not baseline:
+        raise ValueError("源表缺少年初市值，且无上一年末正式快照，无法计算年初持仓变化")
     subset = data.copy()
     manager_column = _manager_column(subset)
     if account and account != "全部":
@@ -348,6 +393,19 @@ def asset_evidence_year_open(
         .reset_index()
     )
 
+    if baseline:
+        opening = (
+            _snapshot_slice(subset, baseline)
+            .groupby(cols, dropna=False)
+            .agg(full_market_value_prior=("full_market_value", "sum"), source_rows_prior=("asset_name", "size"))
+            .reset_index()
+        )
+        evidence = evidence.drop(columns="full_market_value_prior").merge(opening, on=cols, how="outer")
+        value_cols = [column for column in evidence.columns if column not in cols]
+        evidence[value_cols] = evidence[value_cols].fillna(0.0)
+    else:
+        evidence["source_rows_prior"] = None
+
     if prior_month:
         month_prior = (
             _snapshot_slice(subset, prior_month)
@@ -365,7 +423,6 @@ def asset_evidence_year_open(
         evidence["full_market_value_month_prior"] = None
         evidence["source_rows_month_prior"] = None
 
-    evidence["source_rows_prior"] = None
     evidence["full_market_value_delta"] = (
         evidence["full_market_value_current"] - evidence["full_market_value_prior"]
     )
