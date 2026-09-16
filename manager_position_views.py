@@ -106,6 +106,53 @@ def position_peer_history(rows, current_snapshot, board, include_interim=False):
     return history, current
 
 
+def peer_history_coverage_caption(
+    selected: pd.DataFrame,
+    dates: list[str],
+    member_count: int,
+    source_kind_by_date: dict[str, str] | None = None,
+) -> str:
+    """Explain missing cells without treating an uncovered source as zero holdings."""
+    if selected.empty or not dates or member_count <= 0:
+        return ""
+    observed_count = (
+        selected.assign(_observed=selected["investment_value"].notna())
+        .groupby("snapshot_date")['_observed']
+        .sum()
+        .reindex(dates, fill_value=0)
+        .astype(int)
+    )
+    leading_uncovered: list[str] = []
+    for date in dates:
+        if int(observed_count.loc[date]) != 0:
+            break
+        leading_uncovered.append(date)
+
+    parts: list[str] = []
+    if leading_uncovered:
+        if len(leading_uncovered) == len(dates):
+            parts.append(f"本组在 {leading_uncovered[0]} 至 {leading_uncovered[-1]} 没有可用源记录")
+        else:
+            parts.append(
+                f"本组在 {leading_uncovered[0]} 至 {leading_uncovered[-1]} 为 0/{member_count} 个主体有记录"
+            )
+        source_kind_by_date = source_kind_by_date or {}
+        if any(source_kind_by_date.get(date) == "monthly_monitor" for date in leading_uncovered):
+            parts.append("该段资产配置月度监测未覆盖本组")
+        parts.append("图中“未覆盖”代表没有源记录；“首期”代表有记录但缺少前一正式月末；均不按零规模计算")
+
+    partial = observed_count[(observed_count > 0) & (observed_count < member_count)]
+    if not partial.empty:
+        low, high = int(partial.min()), int(partial.max())
+        if low == high:
+            parts.append(f"部分时点仅覆盖 {low}/{member_count} 个主体")
+        else:
+            parts.append(f"部分时点覆盖 {low}–{high}/{member_count} 个主体")
+    if (observed_count < member_count).any() and not leading_uncovered:
+        parts.append("图中“未覆盖”代表没有源记录；“首期”代表有记录但缺少前一正式月末；均不按零规模计算")
+    return "；".join(parts) + "。" if parts else ""
+
+
 def render_peer_income_trend(selected, order, period, view_choice):
     is_return = view_choice == "综合收益率"
     metric = f"comprehensive_{'return' if is_return else 'income'}_{period}"
@@ -172,9 +219,35 @@ def render_position_peer_comparison(rows, current_snapshot, board, include_inter
     latest = selected[selected["snapshot_date"].eq(dates[-1])].copy()
     baseline = latest["baseline_snapshot_date"].iloc[0]
     if pd.notna(baseline):
-        st.caption(f"最新列：{dates[-1]}{' 临时中间版' if dates[-1] in interim_dates else ' 月末正式版'} − {baseline} 月末正式版。历史各列均对比上一可用正式月末；— 表示缺少可比记录。")
+        st.caption(
+            f"最新列：{dates[-1]}{' 临时中间版' if dates[-1] in interim_dates else ' 月末正式版'} − {baseline} 月末正式版。"
+            "历史各列按前一正式月末计算；主体缺失时不把空档当作零，热图用“未覆盖”表示无源记录、用“首期”表示缺少前一正式月末。"
+        )
     else:
         st.caption("尚无更早的正式月末基准，规模变化留空；不将缺失记录视为零。")
+    source_kind_by_date = {}
+    if "source_kind" in rows.columns:
+        source_kind_by_date = (
+            rows.loc[rows["snapshot_date"].astype(str).isin(dates)]
+            .assign(_snapshot_date_text=lambda frame: frame["snapshot_date"].astype(str))
+            .groupby("_snapshot_date_text")["source_kind"]
+            .agg(
+                lambda values: (
+                    next(iter(sorted({str(value) for value in values.dropna()})), "")
+                    if len({str(value) for value in values.dropna()}) <= 1
+                    else "mixed"
+                )
+            )
+            .to_dict()
+        )
+    coverage_caption = peer_history_coverage_caption(
+        selected,
+        dates,
+        len(members),
+        source_kind_by_date,
+    )
+    if coverage_caption:
+        st.caption(coverage_caption)
     metric = "market_value_change"
     tooltip = [
         alt.Tooltip("attribution_entity_name:N", title="主体"),
@@ -187,8 +260,16 @@ def render_position_peer_comparison(rows, current_snapshot, board, include_inter
     largest = max(float(selected[metric].abs().max()) if selected[metric].notna().any() else 0, .01)
     color_scale = alt.Scale(type="symlog", constant=1, domain=[-largest, 0, largest], range=["#963F3D", "#F4F3EE", "#2F7A6B"])
     darkness = np.log1p(selected[metric].abs()) / np.log1p(largest)
-    selected["_value_label"] = selected[metric].map(lambda v: f"{v:+.2f}" if pd.notna(v) else "—")
-    selected["_label_color"] = np.where(darkness > .55, "#FFFFFF", "#1B3A5C")
+    selected["_value_label"] = np.select(
+        [selected["investment_value"].isna(), selected[metric].isna()],
+        ["未覆盖", "首期"],
+        default=selected[metric].map(lambda v: f"{v:+.2f}"),
+    )
+    selected["_label_color"] = np.where(
+        selected["investment_value"].isna(),
+        "#7C8796",
+        np.where(darkness > .55, "#FFFFFF", "#1B3A5C"),
+    )
     base = alt.Chart(selected).encode(
         x=alt.X("_date_label:N", title=None, sort=sorted(selected["_date_label"].unique()), axis=alt.Axis(labelAngle=-45, labelOverlap=False, labelLimit=160)),
         y=alt.Y("attribution_entity_name:N", title=None, sort=order, axis=alt.Axis(labelLimit=260)),

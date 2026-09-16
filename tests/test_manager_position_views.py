@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from manager_position_views import position_peer_history
+from manager_position_views import peer_history_coverage_caption, position_peer_history
 
 
 def row(name, asset_class, value, date="2026-07-31", scope="委内", board="权益", status="official", included=True):
@@ -83,6 +83,40 @@ class PositionPeerHistoryTest(unittest.TestCase):
         self.assertAlmostEqual(by_group.loc["委内权益产品", "comprehensive_return_ytd"], -.2)
         history, _ = position_peer_history(data.iloc[[0, 2]], "2026-07-31", "权益")
         self.assertEqual(history.comprehensive_income_ytd.iloc[0], 13)
+
+    def test_coverage_caption_distinguishes_uncovered_history_from_zero(self):
+        selected = pd.DataFrame(
+            {
+                "snapshot_date": ["2024-12-31", "2025-01-31", "2025-02-28", "2025-02-28"],
+                "investment_value": [float("nan"), float("nan"), 10.0, float("nan")],
+            }
+        )
+        caption = peer_history_coverage_caption(
+            selected,
+            ["2024-12-31", "2025-01-31", "2025-02-28"],
+            2,
+            {"2024-12-31": "monthly_monitor", "2025-01-31": "monthly_monitor"},
+        )
+        self.assertIn("0/2", caption)
+        self.assertIn("资产配置月度监测未覆盖本组", caption)
+        self.assertIn("不按零规模计算", caption)
+        self.assertIn("1/2", caption)
+
+    def test_coverage_caption_explains_partial_history_without_a_leading_gap(self):
+        selected = pd.DataFrame(
+            {
+                "snapshot_date": ["2024-12-31", "2025-01-31"],
+                "investment_value": [10.0, float("nan")],
+            }
+        )
+        caption = peer_history_coverage_caption(
+            selected,
+            ["2024-12-31", "2025-01-31"],
+            2,
+        )
+        self.assertIn("1/2", caption)
+        self.assertIn("未覆盖", caption)
+        self.assertIn("首期", caption)
 
 
 if __name__ == "__main__":
