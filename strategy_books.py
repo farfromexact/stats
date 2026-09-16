@@ -9,7 +9,7 @@ from outsourced_funding import adjust_outsourced_funding_capital
 INTERNAL_MANDATE = "委托资管"
 RETURN_BASE_THRESHOLD = 0.0001
 EXCLUDED_STRATEGY_BOOK = "流动性/其他未纳入五类"
-STRATEGY_CLASSIFICATION_VERSION = "2026-08-02-v4"
+STRATEGY_CLASSIFICATION_VERSION = "2026-09-16-v5"
 
 INTERNAL_STRATEGY_BOOK_ORDER = [
     "固收-配置盘",
@@ -249,6 +249,29 @@ def _text_value(row: pd.Series | dict, column: str) -> str:
     return str(value).strip()
 
 
+def _apply_on_unique_rows(
+    working: pd.DataFrame,
+    key_columns: list[str],
+    function,
+) -> np.ndarray:
+    """Apply a pure row rule once per distinct input signature.
+
+    The source snapshots contain many repeated position signatures.  Keeping
+    the rule functions row-oriented makes their priority order easy to audit,
+    while evaluating each function on the distinct signatures avoids invoking
+    the Python callback hundreds of thousands of times.
+    """
+    unique_rows = working[key_columns].drop_duplicates(ignore_index=True)
+    unique_values = unique_rows.apply(function, axis=1)
+    lookup = pd.Series(
+        unique_values.to_numpy(),
+        index=pd.MultiIndex.from_frame(unique_rows),
+        dtype=object,
+    )
+    full_index = pd.MultiIndex.from_frame(working[key_columns])
+    return lookup.reindex(full_index).to_numpy()
+
+
 def classify_strategy_book(row: pd.Series | dict) -> str:
     mandate_type = _text_value(row, "mandate_type")
     fund_book_name = _text_value(row, "fund_book_name")
@@ -468,21 +491,53 @@ def assign_strategy_book_columns(data: pd.DataFrame) -> pd.DataFrame:
         working[MANAGER_DISPLAY_COLUMN] = pd.Series(dtype=object)
         return working
 
-    working["strategy_book"] = working.apply(classify_strategy_book, axis=1)
+    working["strategy_book"] = _apply_on_unique_rows(
+        working,
+        [
+            "mandate_type",
+            "fund_book_name",
+            "asset_major_class",
+            "asset_class",
+            "trade_strategy",
+            "manager",
+        ],
+        classify_strategy_book,
+    )
     hierarchy_exclusion_reason = _resolve_single_plan_hierarchy(working)
     working["strategy_book_scope"] = working["strategy_book"].map(strategy_book_scope)
     working["strategy_book_display_label"] = working["strategy_book"].map(strategy_book_display_label)
-    working["strategy_book_section"] = working.apply(strategy_book_section, axis=1)
-    working["strategy_book_item"] = working.apply(strategy_book_item, axis=1)
-    working["strategy_book_exclusion_reason"] = working.apply(exclusion_reason, axis=1)
+    working["strategy_book_section"] = _apply_on_unique_rows(
+        working,
+        ["strategy_book", "asset_class", "asset_class_level_1"],
+        strategy_book_section,
+    )
+    working["strategy_book_item"] = _apply_on_unique_rows(
+        working,
+        ["asset_class"],
+        strategy_book_item,
+    )
+    working["strategy_book_exclusion_reason"] = _apply_on_unique_rows(
+        working,
+        [
+            "asset_major_class",
+            "asset_class",
+            "asset_class_level_1",
+            "asset_class_level_2",
+            "trade_strategy",
+            "mandate_type",
+            "fund_book_name",
+        ],
+        exclusion_reason,
+    )
     hierarchy_excluded = hierarchy_exclusion_reason.ne("")
     working.loc[hierarchy_excluded, "strategy_book_exclusion_reason"] = hierarchy_exclusion_reason.loc[
         hierarchy_excluded
     ]
-    working[MANAGER_DISPLAY_COLUMN] = [
-        manager_display_label(manager, strategy_book)
-        for manager, strategy_book in zip(working["manager"], working["strategy_book"])
-    ]
+    working[MANAGER_DISPLAY_COLUMN] = _apply_on_unique_rows(
+        working,
+        ["manager", "strategy_book"],
+        lambda row: manager_display_label(row["manager"], row["strategy_book"]),
+    )
     return working
 
 
