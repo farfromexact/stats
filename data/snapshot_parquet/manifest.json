@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-09-18T12:17:33.992955+00:00",
+  "created_at": "2026-10-09T01:02:15.410752+00:00",
   "manifest_version": "snapshot-parquet-v3",
   "snapshots": [
     {
@@ -540,6 +540,20 @@
       "source_file_hash": "08585af344fed20014636a09ca25acf65d80c78e08739ec335de143c15553e91",
       "source_file_name": "4. 组合管理宽表-新准则时点 20260917.xlsx",
       "source_rows": 16432
+    },
+    {
+      "comprehensive_income_mtd": 11.6174371669,
+      "finance_income_mtd": -9.038957518,
+      "full_market_value": 8201.064953232099,
+      "parquet_file": "2026-09-30.parquet",
+      "parquet_file_hash": "c1b952b0852d78f55b015fa478db52a717b690c0186a8e1e3e11b93677987d04",
+      "sheet_name": "组合管理宽表-新准则时点",
+      "snapshot_date": "2026-09-30",
+      "snapshot_month": "2026-09",
+      "snapshot_status": "official",
+      "source_file_hash": "eb80df60771851ee6af2fe7aa2ebaf56069f42d96744bfaaa68557166b86771b",
+      "source_file_name": "组合管理宽表-新准则时点 20260930.xlsx",
+      "source_rows": 16778
     }
   ]
 }
