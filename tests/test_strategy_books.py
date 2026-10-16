@@ -3,7 +3,7 @@ import unittest
 import pandas as pd
 
 from config import DATA_DIR
-from portfolio_data import load_snapshots
+from portfolio_data import _load_parquet_snapshots, load_snapshots
 from strategy_books import (
     EQUITY_DASHBOARD_LABEL_ORDER,
     EXCLUDED_STRATEGY_BOOK,
@@ -632,6 +632,35 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
                 "国寿富兰克林": 8.305381,
             },
         )
+
+    def test_20261015_control_totals_from_committed_parquet(self):
+        data, _, errors = _load_parquet_snapshots(DATA_DIR, [])
+        self.assertIsNotNone(data)
+        self.assertEqual(errors, [])
+        summary = strategy_book_summary(data, "2026-10-15", "年初以来")
+        actual = dict(zip(summary["strategy_book"], summary["full_market_value_current"]))
+        expected = {
+            "固收-配置盘": 5279.213862,
+            "固收-交易盘": 998.423149,
+            "非标": 230.848977,
+            "权益-配置盘": 444.513417,
+            "权益-交易盘": 274.984417,
+            "人保固收": 126.410528,
+            "泰康固收": 41.507953,
+            "中信建投固收": 7.532117,
+            "中邮证券固收": 7.471994,
+            "富国权益": 4.436370,
+            "华泰权益": 4.633279,
+            "华夏基金权益": 4.379514,
+            "国泰海通权益": 4.236457,
+            "大成基金权益": 2.867052,
+            "广发基金权益": 2.457017,
+            "太平资产香港": 4.207210,
+            "太保投资香港": 13.236967,
+            "国寿富兰克林": 8.298797,
+        }
+        for label, value in expected.items():
+            self.assertAlmostEqual(actual[label], value, places=2)
 
     def test_20260731_equity_dashboard_controls(self):
         data, _, errors = load_snapshots(DATA_DIR)
