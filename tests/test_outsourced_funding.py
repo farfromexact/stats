@@ -36,21 +36,22 @@ class OutsourcedFundingTest(unittest.TestCase):
         self.assertEqual(result.avg_capital_ytd.iloc[2], 3.)
 
     def test_actual_six_accounts_match_across_summary_and_peer_trend(self):
-        raw = pd.read_parquet("data/snapshot_parquet/2026-09-03.parquet")
+        snapshot_date = "2026-09-29"
+        raw = pd.read_parquet(f"data/snapshot_parquet/{snapshot_date}.parquet")
         original = raw.copy(deep=True)
         rows = build_manager_attribution_rows(raw)
-        audit = funding_capital_audit(rows, "2026-09-03").set_index("strategy_book")
+        audit = funding_capital_audit(rows, snapshot_date).set_index("strategy_book")
         self.assertEqual(len(audit), 6)
-        expected = {"华泰权益": .053026426, "富国权益": -.031122391, "华夏基金权益": -.005524293, "国泰海通权益": -.070961211, "大成基金权益": .007335536, "广发基金权益": -.0496798}
+        expected = {"华泰权益": .013042192, "富国权益": -.061760617, "华夏基金权益": -.043455302, "国泰海通权益": -.081080105, "大成基金权益": .001549599, "广发基金权益": -.096446321}
         for book, value in expected.items():
             self.assertAlmostEqual(audit.loc[book, "funding_return"], value, places=5)
         for book in ["大成基金权益", "广发基金权益"]:
             self.assertGreater(audit.loc[book, "avg_capital_ytd"], 2.7)
             self.assertLess(audit.loc[book, "avg_capital_ytd"], 3.1)
-        summary = manager_attribution_summary(rows, "2026-09-03", "权益").set_index("attribution_entity_name")
-        trend, _ = position_peer_history(rows, "2026-09-03", "权益")
+        summary = manager_attribution_summary(rows, snapshot_date, "权益").set_index("attribution_entity_name")
+        trend, _ = position_peer_history(rows, snapshot_date, "权益")
         trend = trend[trend.peer_group.eq("权益委外")].set_index("attribution_entity_name")
-        strategy = strategy_book_summary(raw, "2026-09-03", "年初以来").set_index("strategy_book")
+        strategy = strategy_book_summary(raw, snapshot_date, "年初以来").set_index("strategy_book")
         for book, name in {"华泰权益": "华泰", "富国权益": "富国基金", "华夏基金权益": "华夏基金", "国泰海通权益": "国泰海通", "大成基金权益": "大成基金", "广发基金权益": "广发基金"}.items():
             self.assertAlmostEqual(summary.loc[name, "comprehensive_return_ytd"], audit.loc[book, "funding_return"])
             self.assertAlmostEqual(trend.loc[name, "comprehensive_return_ytd"], audit.loc[book, "funding_return"])

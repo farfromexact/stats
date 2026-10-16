@@ -61,6 +61,27 @@ class MonthlyMonitorImportTest(unittest.TestCase):
                 for field, total in zip(['full_market_value','finance_income_mtd','comprehensive_income_mtd'], totals):
                     self.assertAlmostEqual(float(frame[field].sum()), total, places=7)
 
+    def test_committed_bundle_keeps_monthly_history_and_latest_weekly_snapshot(self):
+        manifest_path = Path(__file__).resolve().parents[1] / 'data/snapshot_parquet' / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        weekly = [
+            entry for entry in manifest['snapshots']
+            if entry['source_file_name'].startswith('固收类资产')
+        ]
+
+        self.assertEqual([entry['snapshot_date'] for entry in weekly], ['2026-09-29'])
+        self.assertEqual(len(manifest['snapshots']), 23)
+        self.assertTrue(
+            all(
+                entry['snapshot_status'] == 'official' or entry['snapshot_date'] == '2026-09-29'
+                for entry in manifest['snapshots']
+            )
+        )
+        self.assertEqual(
+            {path.name for path in manifest_path.parent.glob('*.parquet')},
+            {entry['parquet_file'] for entry in manifest['snapshots']},
+        )
+
     def test_import_is_parquet_only_preserves_overlap_and_is_idempotent(self):
         root = Path(__file__).resolve().parents[1]/'test_tmp'/uuid.uuid4().hex
         root.mkdir(parents=True)
