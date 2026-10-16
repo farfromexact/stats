@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from account_review import asset_evidence_year_open, current_vs_year_open, year_open_baseline_snapshot
+from account_review import (
+    asset_evidence_year_open,
+    current_vs_year_open,
+    snapshot_has_year_open,
+    year_open_baseline_snapshot,
+)
 from app import YEAR_TO_DATE_MODE, comparison_modes_for_snapshot
 
 
@@ -88,7 +93,7 @@ class YearOpenSnapshotTest(unittest.TestCase):
                 self.assertNotIn(YEAR_TO_DATE_MODE, comparison_modes_for_snapshot(data, "2025-02-28"))
                 self.assertTrue(current_vs_year_open(data, "2025-02-28", ["account_bucket"]).full_market_value_delta.isna().all())
 
-    def test_all_imported_months_reconcile_to_their_previous_year_end(self):
+    def test_all_imported_snapshots_reconcile_to_year_open_source_or_previous_year_end(self):
         root = Path(__file__).resolve().parents[1] / "data/snapshot_parquet"
         paths = sorted(path for path in root.glob("*.parquet") if path.stem <= "2026-02-28")
         data = pd.concat([pd.read_parquet(path) for path in paths], ignore_index=True)
@@ -98,14 +103,17 @@ class YearOpenSnapshotTest(unittest.TestCase):
                 continue
             with self.subTest(date=date):
                 baseline = "2024-12-31" if date.startswith("2025") else "2025-12-31"
-                self.assertEqual(year_open_baseline_snapshot(data, date), baseline)
+                has_source_open = snapshot_has_year_open(data, date)
+                expected_baseline = "" if has_source_open else baseline
+                self.assertEqual(year_open_baseline_snapshot(data, date), expected_baseline)
                 self.assertIn(YEAR_TO_DATE_MODE, comparison_modes_for_snapshot(data, date))
                 current = data[data.snapshot_date.eq(date)]
                 prior = data[data.snapshot_date.eq(baseline)]
                 for groups in [["account_bucket"], ["asset_class"], ["mandate_type"], ["account_bucket", "asset_class"]]:
                     summary = current_vs_year_open(data, date, groups)
-                    self.assertAlmostEqual(summary.full_market_value_prior.sum(), prior.full_market_value.sum(), places=8)
-                    self.assertAlmostEqual(summary.full_market_value_delta.sum(), current.full_market_value.sum() - prior.full_market_value.sum(), places=8)
+                    expected_prior = current.market_value_year_open.sum() if has_source_open else prior.full_market_value.sum()
+                    self.assertAlmostEqual(summary.full_market_value_prior.sum(), expected_prior, places=8)
+                    self.assertAlmostEqual(summary.full_market_value_delta.sum(), current.full_market_value.sum() - expected_prior, places=8)
                     self.assertAlmostEqual(summary.comprehensive_income_period.sum(), current.comprehensive_income_ytd.sum(), places=8)
                     self.assertAlmostEqual(summary.avg_capital_mtd_current.sum(), current.avg_capital_ytd.sum(), places=8)
 
