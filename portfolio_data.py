@@ -377,12 +377,20 @@ def _load_parquet_snapshots(
 
     files = list(files or [])
     entries_by_name = {str(entry.get("source_file_name", "")): entry for entry in entries}
+    extra_local_files = [path for path in files if path.name not in entries_by_name]
     if files:
-        local_source_names = {path.name for path in files}
-        if not local_source_names.issubset(entries_by_name):
-            return None
+        # The deployed bundle can contain only the retained monthly snapshots
+        # plus the newest interim snapshot, while a developer checkout may
+        # still keep older weekly Excel sources locally.  Validate matching
+        # local sources, but do not let those extra sources invalidate the
+        # published Parquet bundle and force an Excel fallback.  Extra local
+        # sources are appended below as local-only historical coverage.
+        matching_files = [path for path in files if path.name in entries_by_name]
         try:
-            if any(entries_by_name[path.name]["source_file_hash"] != _file_hash(path) for path in files):
+            if any(
+                entries_by_name[path.name]["source_file_hash"] != _file_hash(path)
+                for path in matching_files
+            ):
                 return None
         except OSError:
             return None
@@ -410,9 +418,25 @@ def _load_parquet_snapshots(
         frames.append(frame)
         logs.append(_manifest_entry_to_log(entry))
 
+    for path in extra_local_files:
+        frame, log = _read_one(path)
+        if frame is None or log.get("status") != "OK":
+            return None
+        frames.append(frame)
+        logs.append(log)
+
     if not frames:
         return None
-    return pd.concat(frames, ignore_index=True), pd.DataFrame(logs), []
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined.sort_values(
+        ["snapshot_date", "source_file_name", "source_row_no"],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    validation = pd.DataFrame(logs).sort_values(
+        ["snapshot_date", "source_file_name"],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    return combined, validation, []
 
 
 def load_snapshots(

@@ -16,6 +16,7 @@ except ImportError:  # pragma: no cover - compatibility with older Streamlit
     StreamlitSecretNotFoundError = RuntimeError
 
 import account_review as account_review_module
+import company_stock_holdings as company_stock_holdings_module
 import manager_attribution as manager_attribution_module
 import strategy_books as strategy_books_module
 from manager_position_views import render_position_peer_comparison
@@ -31,6 +32,7 @@ from portfolio_data import (
 )
 
 account_review_module = importlib.reload(account_review_module)
+company_stock_holdings_module = importlib.reload(company_stock_holdings_module)
 manager_attribution_module = importlib.reload(manager_attribution_module)
 strategy_books_module = importlib.reload(strategy_books_module)
 
@@ -38,6 +40,8 @@ asset_evidence = account_review_module.asset_evidence
 asset_evidence_year_open = account_review_module.asset_evidence_year_open
 comparison_summary = account_review_module.comparison_summary
 year_open_baseline_snapshot = account_review_module.year_open_baseline_snapshot
+company_stock_holding_ranking = company_stock_holdings_module.company_stock_holding_ranking
+company_stock_industry_distribution = company_stock_holdings_module.company_stock_industry_distribution
 ATTRIBUTION_BOARD_EQUITY = manager_attribution_module.ATTRIBUTION_BOARD_EQUITY
 ATTRIBUTION_BOARD_FIXED = manager_attribution_module.ATTRIBUTION_BOARD_FIXED
 build_manager_attribution_rows = manager_attribution_module.build_manager_attribution_rows
@@ -794,6 +798,16 @@ DISPLAY_NAMES = {
     "asset_name": "资产名称",
     "asset_code": "资产代码",
     "trade_code": "交易代码",
+    "stock_label": "股票",
+    "rank": "排名",
+    "industry": "申万一级行业",
+    "industry_mapping_method": "行业映射口径",
+    "non_outsourced_market_value_current": "不含委外市值(亿)",
+    "outsourced_market_value_current": "委外市值(亿)",
+    "cost_basis_period": "成本基准(亿)",
+    "loss_amount_period": "亏损金额(亿)",
+    "profit_amount_period": "盈利金额(亿)",
+    "stock_count": "股票数",
     "change_type": "变化类型",
     "full_market_value_current": "当前时点市值(亿)",
     "full_market_value_prior": "上月市值(亿)",
@@ -887,6 +901,11 @@ AMOUNT_COLUMNS = {
     "avg_capital_mtd",
     "avg_capital_ytd",
     "full_market_value_current",
+    "non_outsourced_market_value_current",
+    "outsourced_market_value_current",
+    "cost_basis_period",
+    "loss_amount_period",
+    "profit_amount_period",
     "full_market_value_prior",
     "prior_full_market_value",
     "full_market_value_delta",
@@ -924,6 +943,7 @@ PCT_COLUMNS = {
 }
 DURATION_COLUMNS = {"duration", "weighted_duration"}
 COUNT_COLUMNS = {
+    "stock_count",
     "record_count",
     "record_count_current",
     "source_rows",
@@ -1397,6 +1417,7 @@ def sidebar_nav() -> None:
         <a class="sidebar-nav-button" href="#charts-overview">图表总览</a>
         <a class="sidebar-nav-button" href="#asset-class-overview">投资品种图表/表格</a>
         <a class="sidebar-nav-button" href="#equity-dashboard">股票专项看板</a>
+        <a class="sidebar-nav-button" href="#company-stock-holdings">公司股票持仓排名</a>
         <a class="sidebar-nav-button" href="#strategy-book-overview">委内/委外比较</a>
         <a class="sidebar-nav-button" href="#manager-attribution">经理/受托归因</a>
         <a class="sidebar-nav-button" href="#account-overview">账户层图表/表格</a>
@@ -1586,6 +1607,9 @@ def render_bar_chart(
     threshold_lines: list[dict[str, object]] | None = None,
     threshold_color_value: float | None = None,
     show_value_labels: bool = False,
+    cost_metric: str | None = None,
+    pnl_metric: str | None = None,
+    exclude_tooltip_columns: set[str] | None = None,
 ) -> None:
     normalized_label_order = [str(label) for label in label_order or []]
     if normalized_label_order:
@@ -1610,6 +1634,26 @@ def render_bar_chart(
     chart_data["_value_label"] = chart_data["_value"].map(
         lambda value: f"{value:.2%}" if metric in PCT_COLUMNS else f"{value:,.2f}"
     )
+    tooltip_exclude_columns = exclude_tooltip_columns or set()
+    if cost_metric and cost_metric in chart_data.columns:
+        chart_data["_cost_value"] = _numeric_series(chart_data, cost_metric).clip(lower=0.0)
+        chart_data["_delta_start"] = np.minimum(chart_data["_value"], chart_data["_cost_value"])
+        chart_data["_delta_end"] = np.maximum(chart_data["_value"], chart_data["_cost_value"])
+        # Draw the blue base only to the shorter of cost/current value.  The
+        # remaining segment is then visible as a separate green/red delta,
+        # regardless of Vega-Lite layer paint order.
+        chart_data["_bar_end"] = chart_data["_delta_start"]
+        if pnl_metric and pnl_metric in chart_data.columns:
+            pnl_values = _numeric_series(chart_data, pnl_metric)
+            chart_data["_delta_group"] = np.select(
+                [pnl_values < -CHART_EPSILON, pnl_values > CHART_EPSILON],
+                ["亏损", "盈利"],
+                default="无期间盈亏",
+            )
+        else:
+            chart_data["_delta_group"] = "无期间盈亏"
+    else:
+        chart_data["_bar_end"] = chart_data["_value"]
     chart_data["_is_funding_asset_class"] = False
     funding_label_col = "asset_class" if "asset_class" in chart_data.columns else label_col
     if label_col in {"asset_class", "asset_class_display"}:
@@ -1685,9 +1729,14 @@ def render_bar_chart(
         "full_market_value_delta",
         "net_full_market_value_delta",
         "avg_capital_mtd_current",
+        "cost_basis_period",
+        "loss_amount_period",
+        "profit_amount_period",
         "finance_return_mtd",
         "comprehensive_return_mtd",
     ]:
+        if column in tooltip_exclude_columns:
+            continue
         if column not in chart_data.columns:
             continue
         if column == metric:
@@ -1705,6 +1754,13 @@ def render_bar_chart(
         min_value = float(chart_data["_value"].min())
         max_value = float(chart_data["_value"].max())
         domain_values = [min_value, max_value, 0.0]
+        if "_cost_value" in chart_data.columns:
+            domain_values.extend(
+                [
+                    float(chart_data["_cost_value"].min()),
+                    float(chart_data["_cost_value"].max()),
+                ]
+            )
         if threshold_lines:
             for threshold_line in threshold_lines:
                 try:
@@ -1729,26 +1785,70 @@ def render_bar_chart(
         axis=alt.Axis(labelLimit=220),
     )
 
-    bars = (
-        alt.Chart(chart_data)
-        .mark_bar(cornerRadiusEnd=2)
-        .encode(
-            x=alt.X("_value:Q", **x_encoding),
-            y=y_encoding,
-            color=alt.Color(
-                "_bar_color_group:N",
-                title=None,
-                scale=alt.Scale(
-                    domain=color_domain,
-                    range=color_range,
-                ),
-                legend=None,
-            ),
-            tooltip=tooltips,
-        )
+    bars_chart = alt.Chart(chart_data)
+    bars_mark = (
+        bars_chart.mark_bar(size=16, cornerRadiusEnd=2)
+        if "_cost_value" in chart_data.columns
+        else bars_chart.mark_bar(cornerRadiusEnd=2)
     )
+    bars = bars_mark.encode(
+        x=alt.X("_bar_end:Q", **x_encoding),
+        y=y_encoding,
+        color=alt.Color(
+            "_bar_color_group:N",
+            title=None,
+            scale=alt.Scale(
+                domain=color_domain,
+                range=color_range,
+            ),
+            legend=None,
+        ),
+        tooltip=tooltips,
+    )
+    cost_bar = None
+    delta_bar = None
+    if "_cost_value" in chart_data.columns:
+        chart_data["_zero"] = 0.0
+        cost_bar = (
+            alt.Chart(chart_data)
+            .mark_bar(size=24, color="#C9A84C", opacity=0.30, cornerRadiusEnd=2)
+            .encode(
+                x=alt.X("_zero:Q", **x_encoding),
+                x2=alt.X2("_cost_value:Q"),
+                y=y_encoding,
+                tooltip=tooltips,
+            )
+        )
+        delta_frame = chart_data[
+            (chart_data["_delta_end"] - chart_data["_delta_start"] > CHART_EPSILON)
+            & chart_data["_delta_group"].ne("无期间盈亏")
+        ].copy()
+        if not delta_frame.empty:
+            delta_bar = (
+                alt.Chart(delta_frame)
+                .mark_bar(size=16, cornerRadiusEnd=2)
+                .encode(
+                    x=alt.X("_delta_start:Q", **x_encoding),
+                    x2=alt.X2("_delta_end:Q"),
+                    y=y_encoding,
+                    color=alt.Color(
+                        "_delta_group:N",
+                        title="相对成本",
+                        scale=alt.Scale(
+                            domain=["盈利", "亏损"],
+                            range=["#2F7A6B", "#B42318"],
+                        ),
+                        legend=alt.Legend(orient="top"),
+                    ),
+                    tooltip=tooltips,
+                )
+            )
     zero_rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="#475569", opacity=0.55).encode(x="x:Q")
     chart_layers = bars + zero_rule
+    if cost_bar is not None:
+        chart_layers = cost_bar + chart_layers
+    if delta_bar is not None:
+        chart_layers = chart_layers + delta_bar
     if threshold_lines:
         threshold_frame = pd.DataFrame(threshold_lines).copy()
         if not threshold_frame.empty and "value" in threshold_frame.columns:
@@ -1843,6 +1943,7 @@ def render_bar_chart(
         .properties(title=title, height=_bar_height(len(chart_data)))
         .configure_view(strokeWidth=0)
         .configure_title(anchor="start", color=POSITIVE_COLOR, fontSize=15)
+        .resolve_scale(color="independent")
     )
     st.altair_chart(chart, width="stretch")
 
@@ -2588,6 +2689,221 @@ def render_equity_dashboard(
         ),
         width="stretch",
         hide_index=True,
+    )
+
+
+def render_company_stock_holding_ranking(
+    data: pd.DataFrame,
+    current_month: str,
+    comparison_mode: str,
+) -> None:
+    """Render the company-wide stock ranking and its industry distribution."""
+    control_cols = st.columns([0.31, 0.29, 0.18, 0.32])
+    with control_cols[0]:
+        holding_scope = st.radio(
+            "持仓范围",
+            ["委内", "委外"],
+            index=0,
+            horizontal=True,
+            key="company-stock-holding-scope",
+            help="选择已识别的委内或委外股票范围；未纳入分类的源表行不进入本模块。",
+        )
+    with control_cols[1]:
+        oci_scope = st.radio(
+            "OCI口径",
+            ["不含 OCI", "含 OCI"] if holding_scope == "委内" else ["不适用 OCI"],
+            index=0,
+            horizontal=True,
+            key="company-stock-oci-scope",
+            disabled=holding_scope == "委外",
+            help="按现有股票专项看板规则识别 OCI：委托资管、权益、鲍淼、配置、股票；默认不含 OCI。",
+        )
+        include_oci = holding_scope == "委内" and oci_scope == "含 OCI"
+    with control_cols[2]:
+        table_limit = st.selectbox(
+            "排名表显示",
+            [20, 50, 100, 200, "全部"],
+            index=1,
+            key="company-stock-ranking-limit",
+            format_func=lambda value: "全部股票" if value == "全部" else f"前 {value} 只",
+        )
+    ranking_sort_options = {
+        "当前持仓市值（降序）": "full_market_value_current",
+        "市值占比（降序）": "market_value_share",
+        "期间综合收益（降序）": "comprehensive_income_period",
+        "亏损金额（降序）": "loss_amount_period",
+    }
+    with control_cols[3]:
+        ranking_sort_label = st.selectbox(
+            "排名排序",
+            list(ranking_sort_options),
+            index=0,
+            key="company-stock-ranking-sort",
+        )
+
+    scope_label = holding_scope
+    oci_label = "含 OCI" if holding_scope == "委内" and include_oci else (
+        "不含 OCI" if holding_scope == "委内" else "不适用 OCI"
+    )
+    view_label = f"{scope_label}，{oci_label}"
+    ranking = company_stock_holding_ranking(
+        data,
+        current_month,
+        holding_scope=holding_scope,
+        include_oci=include_oci,
+        comparison_mode=comparison_mode,
+    )
+    industry_distribution = company_stock_industry_distribution(
+        data,
+        current_month,
+        holding_scope=holding_scope,
+        include_oci=include_oci,
+        comparison_mode=comparison_mode,
+    )
+    if ranking.empty:
+        st.info(f"当前时点没有符合“{view_label}”口径的正市值股票。")
+        return
+
+    ranking = ranking.sort_values(
+        [ranking_sort_options[ranking_sort_label], "full_market_value_current", "asset_name"],
+        ascending=[False, False, True],
+        na_position="last",
+        kind="mergesort",
+    ).reset_index(drop=True)
+    ranking["rank"] = np.arange(1, len(ranking) + 1, dtype=int)
+    total_market_value = float(ranking["full_market_value_current"].sum())
+    top10_share = float(
+        ranking.sort_values("full_market_value_current", ascending=False, kind="mergesort")
+        .head(10)["market_value_share"]
+        .sum()
+    )
+    mapped_market_value = float(
+        industry_distribution.loc[
+            industry_distribution["industry_mapping_method"].ne("未映射"),
+            "full_market_value_current",
+        ].sum()
+    )
+    mapping_coverage = mapped_market_value / total_market_value if total_market_value > RETURN_BASE_THRESHOLD else np.nan
+    kpi_items = [
+        {"label": "纳入股票数", "value": f"{len(ranking):,}"},
+        {"label": f"股票持仓市值（{view_label}）", "value": amount(total_market_value)},
+        {"label": "前10只集中度", "value": pct(top10_share)},
+        {"label": "行业映射覆盖市值", "value": pct(mapping_coverage), "delta": "申万一级/参考映射"},
+    ]
+    render_kpi_grid(kpi_items, grid_class="kpi-grid-company-stock")
+    st.caption(
+        f"当前时点 {snapshot_display_label(current_month)}；排名按正市值单只股票汇总，"
+        "同一股票跨账户、跨投资经理合并。持仓范围只纳入已识别的委内或委外；"
+        "单一委外上下层重复来源按现有分类规则剔除；"
+        f"当前口径为{view_label}，排名按{ranking_sort_label}。"
+    )
+
+    ranking_chart = ranking.head(20).copy()
+    st.caption(
+        "图例：金色底柱为成本基准，蓝色柱为当前持仓市值，绿色/红色差额分别为期间盈利/亏损；"
+        "悬停可查看盈利金额或亏损金额。成本基准按当前市值减期间综合收益估算，"
+        "源表没有单独的历史买入成本字段。"
+    )
+    render_bar_chart(
+        ranking_chart,
+        "full_market_value_current",
+        "stock_label",
+        f"公司整体股票持仓排名 Top 20（{view_label}）",
+        "当前持仓市值(亿)",
+        limit=20,
+        selection="abs",
+        comparison_mode=comparison_mode,
+        empty_message="当前没有可展示的股票持仓。",
+        label_order=ranking_chart["stock_label"].astype(str).tolist(),
+        show_value_labels=True,
+        cost_metric="cost_basis_period",
+        pnl_metric="comprehensive_income_period",
+        exclude_tooltip_columns={"finance_return_mtd", "comprehensive_return_mtd"},
+    )
+
+    display_ranking = ranking if table_limit == "全部" else ranking.head(int(table_limit))
+    ranking_columns = [
+        "rank",
+        "asset_name",
+        "asset_code",
+        "trade_code",
+        "full_market_value_current",
+        "market_value_share",
+        "comprehensive_income_period",
+        "loss_amount_period",
+        "profit_amount_period",
+        "source_rows_current",
+    ]
+    if holding_scope == "委外":
+        ranking_columns.insert(6, "outsourced_market_value_current")
+    st.dataframe(
+        format_table(
+            display_ranking[ranking_columns],
+            comparison_mode=comparison_mode,
+        ),
+        width="stretch",
+        hide_index=True,
+        key="company-stock-ranking-table",
+    )
+    st.download_button(
+        "下载完整股票持仓排名 CSV",
+        ranking.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"公司整体股票持仓排名-{current_month}-{scope_label}-{oci_label}.csv",
+        mime="text/csv",
+        key="company-stock-ranking-download",
+    )
+
+    st.markdown("#### 申万一级行业分布")
+    st.caption(
+        "行业按股票代码匹配参考仓库的观察日行业快照，A股优先使用申万一级；"
+        "当前持仓港股已补充到最接近的申万一级行业；没有可用映射的港股、境外股及少量新增证券保留为“未分类/境外股”，"
+        "占比仍以本模块纳入的全部股票市值为分母。"
+    )
+    industry_chart = industry_distribution.head(20).copy()
+    render_bar_chart(
+        industry_chart,
+        "full_market_value_current",
+        "industry",
+        f"股票持仓行业分布（{view_label}）",
+        "行业持仓市值(亿)",
+        limit=len(industry_chart),
+        selection="abs",
+        comparison_mode=comparison_mode,
+        empty_message="当前没有可展示的行业分布。",
+        label_order=industry_chart["industry"].astype(str).tolist(),
+        show_value_labels=True,
+        cost_metric="cost_basis_period",
+        pnl_metric="comprehensive_income_period",
+        exclude_tooltip_columns={"finance_return_mtd", "comprehensive_return_mtd"},
+    )
+    industry_columns = [
+        "rank",
+        "industry",
+        "industry_mapping_method",
+        "full_market_value_current",
+        "market_value_share",
+        "stock_count",
+        "comprehensive_income_period",
+        "loss_amount_period",
+        "profit_amount_period",
+    ]
+    if holding_scope == "委外":
+        industry_columns.insert(5, "outsourced_market_value_current")
+    st.dataframe(
+        format_table(
+            industry_distribution[industry_columns],
+            comparison_mode=comparison_mode,
+        ),
+        width="stretch",
+        hide_index=True,
+        key="company-stock-industry-table",
+    )
+    st.download_button(
+        "下载完整行业分布 CSV",
+        industry_distribution.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"公司整体股票行业分布-{current_month}-{scope_label}-{oci_label}.csv",
+        mime="text/csv",
+        key="company-stock-industry-download",
     )
 
 
@@ -4865,6 +5181,17 @@ def main() -> None:
         "无持仓公司保留零值，平均资金占用不足时收益率显示为 —。"
     )
     render_equity_dashboard(data, current_month, comparison_mode)
+
+    st.divider()
+
+    section_anchor("company-stock-holdings")
+    st.subheader("公司整体股票持仓排名")
+    show_block_note(
+        "本模块将股票按股票代码汇总到公司层面，不再按投资经理或账户拆行；"
+        "持仓范围切换为委内或委外；选择委内时可进一步切换含 OCI 或不含 OCI，默认不含 OCI。"
+        "下方同时按申万一级观察标签展示行业分布，当前持仓港股已补充映射，仍未覆盖的境外股单独保留。"
+    )
+    render_company_stock_holding_ranking(data, current_month, comparison_mode)
 
     st.divider()
 

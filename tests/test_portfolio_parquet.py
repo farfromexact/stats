@@ -76,6 +76,40 @@ class ParquetSnapshotLoaderTest(unittest.TestCase):
         self.assertEqual(manifest["snapshots"][0]["parquet_file"], "2026-06-30.parquet")
         self.assertRegex(manifest["snapshots"][0]["parquet_file_hash"], r"^[0-9a-f]{64}$")
 
+    def test_load_snapshots_keeps_extra_local_excel_sources_with_published_parquet(self):
+        build_snapshot_parquet(self.data_dir)
+        self.write_snapshot(16.0, self.data_dir / "snapshot 20260716.xlsx")
+
+        with mock.patch("portfolio_data._read_one", wraps=portfolio_data._read_one) as read_one:
+            data, validation, errors = load_snapshots(self.data_dir)
+
+        self.assertEqual(errors, [])
+        self.assertTrue(read_one.called)
+        self.assertEqual(len(validation), 2)
+        self.assertEqual(available_snapshots(data), ["2026-06-30", "2026-07-16"])
+
+    def test_builder_retains_monthly_history_and_only_latest_interim(self):
+        self.write_snapshot(16.0, self.data_dir / "snapshot 20260716.xlsx")
+        self.write_snapshot(23.0, self.data_dir / "snapshot 20260723.xlsx")
+        self.write_snapshot(31.0, self.data_dir / "snapshot 20260731.xlsx")
+
+        build_snapshot_parquet(self.data_dir)
+        manifest_path = snapshot_parquet_manifest_path(self.data_dir)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            [entry["snapshot_date"] for entry in manifest["snapshots"]],
+            ["2026-06-30", "2026-07-23", "2026-07-31"],
+        )
+
+        self.write_snapshot(6.0, self.data_dir / "snapshot 20260806.xlsx")
+        build_snapshot_parquet(self.data_dir)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            [entry["snapshot_date"] for entry in manifest["snapshots"]],
+            ["2026-06-30", "2026-07-31", "2026-08-06"],
+        )
+        self.assertFalse((snapshot_parquet_dir(self.data_dir) / "2026-07-23.parquet").exists())
+
     def test_load_snapshots_works_without_excel_sources(self):
         build_snapshot_parquet(self.data_dir)
         shutil.rmtree(self.data_dir)

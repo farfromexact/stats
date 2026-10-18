@@ -30,7 +30,10 @@ from portfolio_data import (
     _snapshot_status, _validated_manifest_entries, normalize_snapshot_rows,
     snapshot_parquet_dir,
 )
-from scripts.build_snapshot_parquet import _load_existing_entries
+from scripts.build_snapshot_parquet import (
+    _load_existing_entries,
+    retain_monthly_and_latest_interim,
+)
 
 M = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 R = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
@@ -188,9 +191,21 @@ def import_monitor(source: Path, output_dir: Path, report_path: Path, *, apply: 
     raw, report = extract_detail(source)
     if _file_hash(source) != source_hash:
         raise ValueError('Source workbook changed during extraction')
-    existing = _load_existing_entries(output_dir)
+    all_existing = _load_existing_entries(output_dir)
+    existing = retain_monthly_and_latest_interim(all_existing)
+    retained_parquet_names = {str(entry['parquet_file']) for entry in existing}
+    pruned_entries = [
+        entry for entry in all_existing
+        if str(entry['parquet_file']) not in retained_parquet_names
+    ]
     by_date = {e['snapshot_date']: e for e in existing}
-    report.update(source_file_name=source.name, source_file_hash=source_hash, snapshots=[], applied=False)
+    report.update(
+        source_file_name=source.name,
+        source_file_hash=source_hash,
+        snapshots=[],
+        pruned_snapshots=[entry['snapshot_date'] for entry in pruned_entries],
+        applied=False,
+    )
     with staging_directory(report_path.parent) as staged:
         additions = []
         for date, partition in raw.groupby('snapshot_date', sort=True):
@@ -227,13 +242,24 @@ def import_monitor(source: Path, output_dir: Path, report_path: Path, *, apply: 
         report['added_snapshots'] = len(additions)
         report['added_rows'] = sum(e['source_rows'] for e in additions)
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
-        if apply and additions:
+        if apply and (additions or pruned_entries):
             # Check the destination again after the potentially long source scan.
-            if _load_existing_entries(output_dir) != existing:
+            if _load_existing_entries(output_dir) != all_existing:
                 raise ValueError('Existing history changed during import')
             output_dir.mkdir(parents=True, exist_ok=True)
             installed = []
+            moved_old = []
+            old_manifest_path = output_dir / 'manifest.json'
+            old_manifest = old_manifest_path.read_bytes() if old_manifest_path.exists() else None
             try:
+                backup_dir = staged / 'pruned_parquet'
+                backup_dir.mkdir(exist_ok=True)
+                for entry in pruned_entries:
+                    target = output_dir / str(entry['parquet_file'])
+                    if target.exists():
+                        backup = backup_dir / target.name
+                        target.rename(backup)
+                        moved_old.append((target, backup))
                 for entry in additions:
                     target = output_dir/entry['parquet_file']
                     if target.exists():
@@ -244,8 +270,17 @@ def import_monitor(source: Path, output_dir: Path, report_path: Path, *, apply: 
                 manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding='utf-8')
                 manifest_tmp.replace(output_dir/'manifest.json')
             except Exception:
+                manifest_path = output_dir / 'manifest.json'
+                if old_manifest is None:
+                    if manifest_path.exists():
+                        manifest_path.unlink()
+                else:
+                    manifest_path.write_bytes(old_manifest)
                 for path in installed:
                     path.unlink()
+                for target, backup in reversed(moved_old):
+                    if backup.exists():
+                        backup.rename(target)
                 raise
             report['applied'] = True
             report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')

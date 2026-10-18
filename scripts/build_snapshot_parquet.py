@@ -15,10 +15,12 @@ if str(ROOT) not in sys.path:
 from config import DATA_DIR
 from portfolio_data import (
     PARQUET_MANIFEST_VERSION,
+    SNAPSHOT_STATUS_INTERIM,
     _file_hash,
     _parquet_frame_matches_manifest,
     _read_one,
     _snapshot_date,
+    _snapshot_status,
     _validated_manifest_entries,
     discover_snapshot_files,
     snapshot_parquet_dir,
@@ -54,6 +56,34 @@ def _load_existing_entries(output_dir: Path) -> list[dict]:
     return entries
 
 
+def retain_monthly_and_latest_interim(
+    entries: list[dict],
+    additional_interim_dates: list[str] | None = None,
+) -> list[dict]:
+    """Keep every month-end entry and only the latest interim entry.
+
+    ``additional_interim_dates`` lets a build consider newly arrived local
+    source files before they have been written to the manifest.  This keeps
+    the published bundle bounded when several weekly files are present in a
+    developer's local input directory.
+    """
+    entries = list(entries)
+    interim_dates = [
+        str(entry.get("snapshot_date", ""))
+        for entry in entries
+        if str(entry.get("snapshot_status", "")) == SNAPSHOT_STATUS_INTERIM
+    ]
+    interim_dates.extend(str(date) for date in (additional_interim_dates or []) if date)
+    latest_interim_date = max(interim_dates, default=None)
+    retained = [
+        entry
+        for entry in entries
+        if str(entry.get("snapshot_status", "")) != SNAPSHOT_STATUS_INTERIM
+        or str(entry.get("snapshot_date", "")) == latest_interim_date
+    ]
+    return sorted(retained, key=lambda entry: str(entry.get("snapshot_date", "")))
+
+
 def build_snapshot_parquet(data_dir: Path = DATA_DIR, output_dir: Path | None = None) -> Path:
     data_dir = Path(data_dir)
     output_dir = Path(output_dir) if output_dir is not None else snapshot_parquet_dir(data_dir)
@@ -63,6 +93,22 @@ def build_snapshot_parquet(data_dir: Path = DATA_DIR, output_dir: Path | None = 
 
     output_dir.mkdir(parents=True, exist_ok=True)
     existing_entries = _load_existing_entries(output_dir)
+    source_interim_dates = [
+        snapshot_date
+        for path in files
+        if (snapshot_date := _snapshot_date(path.name))
+        and _snapshot_status(snapshot_date) == SNAPSHOT_STATUS_INTERIM
+    ]
+    existing_entries = retain_monthly_and_latest_interim(existing_entries, source_interim_dates)
+    latest_interim_date = max(
+        source_interim_dates
+        + [
+            str(entry["snapshot_date"])
+            for entry in existing_entries
+            if str(entry.get("snapshot_status", "")) == SNAPSHOT_STATUS_INTERIM
+        ],
+        default=None,
+    )
     entries_by_date = {str(entry["snapshot_date"]): entry for entry in existing_entries}
     frames_to_write: dict[str, object] = {}
     written_snapshot_dates: set[str] = set()
@@ -73,6 +119,11 @@ def build_snapshot_parquet(data_dir: Path = DATA_DIR, output_dir: Path | None = 
         if snapshot_date in written_snapshot_dates:
             raise RuntimeError(f"Duplicate snapshot date {snapshot_date}: {path.name}")
         written_snapshot_dates.add(snapshot_date)
+        if (
+            _snapshot_status(snapshot_date) == SNAPSHOT_STATUS_INTERIM
+            and snapshot_date != latest_interim_date
+        ):
+            continue
 
         existing_entry = entries_by_date.get(snapshot_date)
         source_hash = _file_hash(path)
