@@ -36,13 +36,13 @@ class OutsourcedFundingTest(unittest.TestCase):
         self.assertEqual(result.avg_capital_ytd.iloc[2], 3.)
 
     def test_actual_six_accounts_match_across_summary_and_peer_trend(self):
-        snapshot_date = "2026-10-15"
+        snapshot_date = "2026-10-22"
         raw = pd.read_parquet(f"data/snapshot_parquet/{snapshot_date}.parquet")
         original = raw.copy(deep=True)
         rows = build_manager_attribution_rows(raw)
         audit = funding_capital_audit(rows, snapshot_date).set_index("strategy_book")
         self.assertEqual(len(audit), 6)
-        expected = {"华泰权益": -.073435026, "富国权益": -.111350889, "华夏基金权益": -.122807367, "国泰海通权益": -.150987005, "大成基金权益": -.043225240, "广发基金权益": -.176542678}
+        expected = {"华泰权益": -.095694, "富国权益": -.134032, "华夏基金权益": -.146077, "国泰海通权益": -.183831, "大成基金权益": -.081058, "广发基金权益": -.206799}
         for book, value in expected.items():
             self.assertAlmostEqual(audit.loc[book, "funding_return"], value, places=5)
         for book in ["大成基金权益", "广发基金权益"]:
