@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - compatibility with older Streamlit
 
 import account_review as account_review_module
 import company_stock_holdings as company_stock_holdings_module
+from stock_industry_view import render_stock_industry_concentration
 import manager_attribution as manager_attribution_module
 import strategy_books as strategy_books_module
 from manager_position_views import render_position_peer_comparison
@@ -1418,6 +1419,7 @@ def sidebar_nav() -> None:
         <a class="sidebar-nav-button" href="#asset-class-overview">投资品种图表/表格</a>
         <a class="sidebar-nav-button" href="#equity-dashboard">股票专项看板</a>
         <a class="sidebar-nav-button" href="#company-stock-holdings">公司股票持仓排名</a>
+        <a class="sidebar-nav-button" href="#stock-industry-concentration">股票行业集中度</a>
         <a class="sidebar-nav-button" href="#strategy-book-overview">委内/委外比较</a>
         <a class="sidebar-nav-button" href="#manager-attribution">经理/受托归因</a>
         <a class="sidebar-nav-button" href="#account-overview">账户层图表/表格</a>
@@ -5192,6 +5194,12 @@ def main() -> None:
         "下方同时按申万一级观察标签展示行业分布，当前持仓港股已补充映射，仍未覆盖的境外股单独保留。"
     )
     render_company_stock_holding_ranking(data, current_month, comparison_mode)
+
+    st.divider()
+
+    section_anchor("stock-industry-concentration")
+    st.subheader("股票行业集中度")
+    render_stock_industry_concentration(data, current_month)
 
     st.divider()
 
