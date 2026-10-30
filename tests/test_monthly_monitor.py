@@ -69,11 +69,11 @@ class MonthlyMonitorImportTest(unittest.TestCase):
             if entry['source_file_name'].startswith('固收类资产')
         ]
 
-        self.assertEqual([entry['snapshot_date'] for entry in weekly], ['2026-10-22'])
+        self.assertEqual([entry['snapshot_date'] for entry in weekly], ['2026-10-29'])
         self.assertEqual(len(manifest['snapshots']), 23)
         self.assertTrue(
             all(
-                entry['snapshot_status'] == 'official' or entry['snapshot_date'] == '2026-10-22'
+                entry['snapshot_status'] == 'official' or entry['snapshot_date'] == '2026-10-29'
                 for entry in manifest['snapshots']
             )
         )

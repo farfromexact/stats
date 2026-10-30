@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-10-23T08:49:46.436828+00:00",
+  "created_at": "2026-10-30T07:44:04.730369+00:00",
   "manifest_version": "snapshot-parquet-v3",
   "snapshots": [
     {
@@ -416,18 +416,18 @@
       "source_rows": 16778
     },
     {
-      "comprehensive_income_mtd": -33.3297866973,
-      "finance_income_mtd": -56.3818899007,
-      "full_market_value": 8225.8751718928,
-      "parquet_file": "2026-10-22.parquet",
-      "parquet_file_hash": "936fa863d2979a18495589bec98a7552bdab4382ea071151dc5a0a778f81bfff",
+      "comprehensive_income_mtd": 1.034300175600002,
+      "finance_income_mtd": -45.42360966509999,
+      "full_market_value": 8275.188796119199,
+      "parquet_file": "2026-10-29.parquet",
+      "parquet_file_hash": "43031999c92f74af669b347c28dae6cc824fc81874268b1b6e8c1f83970d0267",
       "sheet_name": "Pivot Cache",
-      "snapshot_date": "2026-10-22",
+      "snapshot_date": "2026-10-29",
       "snapshot_month": "2026-10",
       "snapshot_status": "interim",
-      "source_file_hash": "74b6232feb3fa97dfd4d5cba4f77e71bb4a3f5e38fab512e8a7d386c96f836e7",
-      "source_file_name": "固收类资产（截至20261022）.xlsx",
-      "source_rows": 17201
+      "source_file_hash": "125030be70a71988cc5e4ee7c4f40322e5722bb776a4e325c24049449f3be93c",
+      "source_file_name": "固收类资产（截至20261029）.xlsx",
+      "source_rows": 17467
     }
   ]
 }
