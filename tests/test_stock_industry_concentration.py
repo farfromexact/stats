@@ -51,11 +51,11 @@ class StockIndustryConcentrationTest(unittest.TestCase):
         self.assertTrue(concentration_distribution(rows, "委内交易盘").empty)
 
     def test_latest_matches_existing_universe(self):
-        source = pd.read_parquet("data/snapshot_parquet/2026-10-29.parquet")
+        source = pd.read_parquet("data/snapshot_parquet/2026-11-05.parquet")
         before = source.copy(deep=True)
-        rows = concentration_rows(source, "2026-10-29")
+        rows = concentration_rows(source, "2026-11-05")
         dist = concentration_distribution(rows)
-        expected = sum(company_stock_holding_ranking(source, "2026-10-29", holding_scope=s, include_oci=True).full_market_value_current.sum() for s in ["委内", "委外"])
+        expected = sum(company_stock_holding_ranking(source, "2026-11-05", holding_scope=s, include_oci=True).full_market_value_current.sum() for s in ["委内", "委外"])
         self.assertAlmostEqual(dist.market_value.sum(), expected)
         self.assertAlmostEqual(dist.selected_share.sum(), 1)
         self.assertEqual(set(rows.portfolio), {"委内交易盘", "委内 OCI", "委外股票"})

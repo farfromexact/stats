@@ -36,16 +36,16 @@ class OutsourcedFundingTest(unittest.TestCase):
         self.assertEqual(result.avg_capital_ytd.iloc[2], 3.)
 
     def test_actual_six_accounts_match_across_summary_and_peer_trend(self):
-        snapshot_date = "2026-10-29"
+        snapshot_date = "2026-11-05"
         raw = pd.read_parquet(f"data/snapshot_parquet/{snapshot_date}.parquet")
         original = raw.copy(deep=True)
         rows = build_manager_attribution_rows(raw)
         audit = funding_capital_audit(rows, snapshot_date).set_index("strategy_book")
         self.assertEqual(len(audit), 6)
-        expected = {"华泰权益": -.084029, "富国权益": -.151536, "华夏基金权益": -.162840, "国泰海通权益": -.208473, "大成基金权益": -.058130, "广发基金权益": -.224102}
+        expected = {"华泰权益": -0.06132956, "富国权益": -0.14856712, "华夏基金权益": -0.11685867, "国泰海通权益": -0.18925164, "大成基金权益": 0.00247647, "广发基金权益": -0.20810523}
         for book, value in expected.items():
             self.assertAlmostEqual(audit.loc[book, "funding_return"], value, places=5)
-        for book, capital in {"大成基金权益": 3.071715, "广发基金权益": 3.100791}.items():
+        for book, capital in {"大成基金权益": 3.07008492, "广发基金权益": 3.13129464}.items():
             self.assertAlmostEqual(audit.loc[book, "avg_capital_ytd"], capital, places=5)
         summary = manager_attribution_summary(rows, snapshot_date, "权益").set_index("attribution_entity_name")
         trend, _ = position_peer_history(rows, snapshot_date, "权益")

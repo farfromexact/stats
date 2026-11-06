@@ -633,31 +633,31 @@ class StrategyBookActualSnapshotTest(unittest.TestCase):
             },
         )
 
-    def test_20261029_control_totals_from_committed_parquet(self):
+    def test_20261105_control_totals_from_committed_parquet(self):
         data, _, errors = _load_parquet_snapshots(DATA_DIR, [])
         self.assertIsNotNone(data)
         self.assertEqual(errors, [])
-        summary = strategy_book_summary(data, "2026-10-29", "年初以来")
+        summary = strategy_book_summary(data, "2026-11-05", "年初以来")
         actual = dict(zip(summary["strategy_book"], summary["full_market_value_current"]))
         expected = {
-            "固收-配置盘": 5285.201299,
-            "固收-交易盘": 994.524859,
-            "非标": 231.103941,
-            "权益-配置盘": 417.792079,
-            "权益-交易盘": 333.608439,
-            "人保固收": 126.151637,
-            "泰康固收": 42.966163,
-            "中信建投固收": 7.548473,
-            "中邮证券固收": 7.496070,
-            "富国权益": 4.232538,
-            "华泰权益": 4.580389,
-            "华夏基金权益": 4.178431,
-            "国泰海通权益": 3.983759,
-            "大成基金权益": 2.821441,
-            "广发基金权益": 2.305106,
-            "太平资产香港": 4.117390,
-            "太保投资香港": 12.819245,
-            "国寿富兰克林": 8.275256,
+            "固收-配置盘": 5285.151614,
+            "固收-交易盘": 1001.524620,
+            "非标": 231.230736,
+            "权益-配置盘": 422.201376,
+            "权益-交易盘": 336.755553,
+            "人保固收": 123.483991,
+            "泰康固收": 43.948338,
+            "中信建投固收": 7.448451,
+            "中邮证券固收": 7.512654,
+            "富国权益": 4.244470,
+            "华泰权益": 4.693739,
+            "华夏基金权益": 4.410822,
+            "国泰海通权益": 4.078825,
+            "大成基金权益": 3.007603,
+            "广发基金权益": 2.348361,
+            "太平资产香港": 4.141954,
+            "太保投资香港": 12.745117,
+            "国寿富兰克林": 8.286417,
         }
         for label, value in expected.items():
             self.assertAlmostEqual(actual[label], value, places=2)
