@@ -70,7 +70,18 @@ class MonthlyMonitorImportTest(unittest.TestCase):
         ]
 
         self.assertEqual([entry['snapshot_date'] for entry in weekly], ['2026-11-05'])
-        self.assertEqual(len(manifest['snapshots']), 23)
+        self.assertEqual(len(manifest['snapshots']), 24)
+        october = next(entry for entry in manifest['snapshots'] if entry['snapshot_date'] == '2026-10-31')
+        self.assertEqual(october['snapshot_status'], 'official')
+        october_frame = pd.read_parquet(manifest_path.parent / october['parquet_file'])
+        self.assertEqual(len(october_frame), 17539)
+        self.assertEqual(october_frame.snapshot_date.unique().tolist(), ['2026-10-31'])
+        for field, total in {
+            'full_market_value': 8249.8278753691,
+            'finance_income_mtd': -54.6108565652,
+            'comprehensive_income_mtd': -25.1763923457,
+        }.items():
+            self.assertAlmostEqual(float(october_frame[field].sum()), total, places=7)
         self.assertTrue(
             all(
                 entry['snapshot_status'] == 'official' or entry['snapshot_date'] == '2026-11-05'
