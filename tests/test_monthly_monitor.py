@@ -69,7 +69,7 @@ class MonthlyMonitorImportTest(unittest.TestCase):
             if entry['source_file_name'].startswith('固收类资产')
         ]
 
-        self.assertEqual([entry['snapshot_date'] for entry in weekly], ['2026-11-05'])
+        self.assertEqual([entry['snapshot_date'] for entry in weekly], ['2026-11-12'])
         self.assertEqual(len(manifest['snapshots']), 24)
         october = next(entry for entry in manifest['snapshots'] if entry['snapshot_date'] == '2026-10-31')
         self.assertEqual(october['snapshot_status'], 'official')
@@ -84,7 +84,7 @@ class MonthlyMonitorImportTest(unittest.TestCase):
             self.assertAlmostEqual(float(october_frame[field].sum()), total, places=7)
         self.assertTrue(
             all(
-                entry['snapshot_status'] == 'official' or entry['snapshot_date'] == '2026-11-05'
+                entry['snapshot_status'] == 'official' or entry['snapshot_date'] == '2026-11-12'
                 for entry in manifest['snapshots']
             )
         )
